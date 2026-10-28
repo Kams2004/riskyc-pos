@@ -1,0 +1,24 @@
+# Dependencies
+/node_modules/
+
+# Next.js build output
+/.next/
+/out/
+*.tsbuildinfo
+
+# Env files
+.env
+.env*.local
+
+# Build artifacts
+*.aab
+*.apk
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Editor/OS
+.DS_Store
+*.pem
