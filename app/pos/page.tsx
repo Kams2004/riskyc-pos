@@ -44,105 +44,140 @@ function cartLineKey(line: Pick<CartLine, "product" | "selectedColor" | "selecte
 
 const STOCK_DOT = { high: "bg-green-500", low: "bg-amber-500", out: "bg-red-500" };
 
-// ── The quick picker — a non-blocking bar anchored under the catalog grid,
-// never a modal. Tapping a color or size is itself the "add" action: the
-// fewest taps that can resolve an actual choice, nothing more. ──
-function QuickPicker({
-  product,
+// Picks the first in-stock (color, size) combination for a product, so a
+// tapped product can be added straight to the cart with no intermediate
+// picker — the cashier then refines color/size/quantity on the cart line
+// itself, with everything resolved before the sale is validated.
+function defaultVariant(product: Product, cart: CartLine[]): { color: string; size: string } {
+  const colors = product.colors.length > 0 ? product.colors.map((c) => c.name) : [""];
+  const sizes = product.sizes.length > 0 ? product.sizes : [""];
+  for (const c of colors) {
+    for (const s of sizes) {
+      const avail = availableQuantity(product, c, s);
+      const inCart = cart
+        .filter((l) => l.product.id === product.id && l.selectedColor === c && l.selectedSize === s)
+        .reduce((n, l) => n + l.quantity, 0);
+      if (!Number.isFinite(avail) || avail - inCart > 0) return { color: c, size: s };
+    }
+  }
+  return { color: colors[0], size: sizes[0] };
+}
+
+// ── A cart line's color/size, shown inline as small swatches/chips right on
+// the line — no popup, no separate screen. Changing one re-resolves against
+// stock and merges into a matching line if the new combination is already
+// in the cart. Quantity lives here too, via the same +/− stepper as before. ──
+function CartLineRow({
+  line,
   cart,
-  onAdd,
-  onClose,
+  onChangeVariant,
+  onQtyChange,
+  onRemove,
 }: {
-  product: Product;
+  line: CartLine;
   cart: CartLine[];
-  onAdd: (color: string, size: string) => void;
-  onClose: () => void;
+  onChangeVariant: (line: CartLine, color: string, size: string) => void;
+  onQtyChange: (key: string, quantity: number) => void;
+  onRemove: (key: string) => void;
 }) {
+  const product = line.product;
+  const key = cartLineKey(line);
+  const image = product.media.find((m) => m.type === "IMAGE");
   const needsColor = product.colors.length > 1;
   const needsSize = product.sizes.length > 1;
-  const [color, setColor] = useState(needsColor ? "" : product.colors[0]?.name ?? "");
 
   const inCartFor = (c: string, s: string) =>
-    cart.filter((l) => l.product.id === product.id && l.selectedColor === c && l.selectedSize === s).reduce((n, l) => n + l.quantity, 0);
+    cart
+      .filter((l) => l !== line && l.product.id === product.id && l.selectedColor === c && l.selectedSize === s)
+      .reduce((n, l) => n + l.quantity, 0);
 
-  const sizeAvailable = (s: string) => {
-    const avail = availableQuantity(product, color, s);
-    return !Number.isFinite(avail) || avail - inCartFor(color, s) > 0;
+  const sizeAvailableFor = (c: string, s: string) => {
+    const avail = availableQuantity(product, c, s);
+    return !Number.isFinite(avail) || avail - inCartFor(c, s) > 0;
   };
   const colorAvailable = (c: string) => {
     const sizes = product.sizes.length > 0 ? product.sizes : [""];
-    return sizes.some((s) => {
-      const avail = availableQuantity(product, c, s);
-      return !Number.isFinite(avail) || avail - inCartFor(c, s) > 0;
-    });
+    return sizes.some((s) => sizeAvailableFor(c, s));
   };
 
-  const image = product.media.find((m) => m.type === "IMAGE");
+  const pickColor = (c: string) => {
+    if (c === line.selectedColor) return;
+    const sizes = product.sizes.length > 0 ? product.sizes : [""];
+    const nextSize =
+      (sizeAvailableFor(c, line.selectedSize) ? line.selectedSize : undefined) ??
+      sizes.find((s) => sizeAvailableFor(c, s)) ??
+      sizes[0];
+    onChangeVariant(line, c, nextSize);
+  };
 
   return (
-    <div className="absolute bottom-0 left-0 right-0 bg-white border-t border-gray-200 shadow-[0_-4px_20px_rgba(0,0,0,0.08)] rounded-t-2xl p-4 z-20 animate-slide-up">
-      <div className="flex items-center gap-3 mb-3">
-        <div className="w-11 h-11 rounded-lg overflow-hidden bg-gray-100 flex-shrink-0">
+    <div className="pb-3 border-b border-gray-50 last:border-0 last:pb-0">
+      <div className="flex items-center gap-3">
+        <div className="w-12 h-12 rounded-lg overflow-hidden bg-gray-100 flex-shrink-0">
           {image ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img src={image.presignedUrl} alt="" className="w-full h-full object-cover" />
           ) : null}
         </div>
         <div className="flex-1 min-w-0">
-          <p className="text-sm font-semibold text-gray-900 truncate">{product.name}</p>
-          <p className="text-xs text-brand-600 font-bold">{formatPrice(product.price)}</p>
+          <p className="text-xs font-semibold text-gray-900 truncate">{product.name}</p>
+          <p className="text-xs font-bold text-brand-600">{formatPrice(product.price * line.quantity)}</p>
         </div>
-        <button onClick={onClose} className="text-gray-300 hover:text-gray-500 p-1">
-          <X size={18} />
+        <div className="flex items-center gap-1 flex-shrink-0">
+          <button onClick={() => onQtyChange(key, line.quantity - 1)} className="w-6 h-6 rounded-md bg-gray-100 flex items-center justify-center text-gray-500">
+            <Minus size={11} />
+          </button>
+          <span className="w-5 text-center text-xs font-bold tabular-nums">{line.quantity}</span>
+          <button onClick={() => onQtyChange(key, line.quantity + 1)} className="w-6 h-6 rounded-md bg-gray-100 flex items-center justify-center text-gray-500">
+            <Plus size={11} />
+          </button>
+        </div>
+        <button onClick={() => onRemove(key)} className="text-gray-300 hover:text-red-500 flex-shrink-0">
+          <Trash2 size={14} />
         </button>
       </div>
 
-      {needsColor && !color && (
-        <div className="flex flex-wrap gap-2">
-          {product.colors.map((c) => {
-            const outOfStock = !colorAvailable(c.name);
-            return (
-              <button
-                key={c.name}
-                disabled={outOfStock}
-                onClick={() => {
-                  if (!needsSize) {
-                    onAdd(c.name, product.sizes[0] ?? "");
-                  } else {
-                    setColor(c.name);
-                  }
-                }}
-                className={clsx(
-                  "flex items-center gap-1.5 px-3 py-2 rounded-xl border-2 text-sm font-medium",
-                  outOfStock ? "opacity-40" : "border-gray-200 hover:border-brand-300"
-                )}
-              >
-                <span className="w-4 h-4 rounded-full border border-gray-200" style={{ backgroundColor: c.hex }} />
-                {c.name}
-              </button>
-            );
-          })}
-        </div>
-      )}
-
-      {(!needsColor || color) && needsSize && (
-        <div className="flex flex-wrap gap-2">
-          {product.sizes.map((s) => {
-            const outOfStock = !sizeAvailable(s);
-            return (
-              <button
-                key={s}
-                disabled={outOfStock}
-                onClick={() => onAdd(color, s)}
-                className={clsx(
-                  "min-w-[46px] px-3 py-2 rounded-xl border-2 text-sm font-semibold",
-                  outOfStock ? "opacity-40 line-through" : "border-gray-200 hover:border-brand-300"
-                )}
-              >
-                {s}
-              </button>
-            );
-          })}
+      {(needsColor || needsSize) && (
+        <div className="flex flex-wrap items-center gap-1.5 mt-2 pl-[60px]">
+          {needsColor &&
+            product.colors.map((c) => {
+              const selected = c.name === line.selectedColor;
+              const disabled = !selected && !colorAvailable(c.name);
+              return (
+                <button
+                  key={c.name}
+                  disabled={disabled}
+                  onClick={() => pickColor(c.name)}
+                  title={c.name}
+                  className={clsx(
+                    "w-5 h-5 rounded-full flex-shrink-0 transition-all",
+                    selected ? "ring-2 ring-brand-400 ring-offset-1" : "ring-1 ring-gray-200",
+                    disabled && "opacity-30"
+                  )}
+                  style={{ backgroundColor: c.hex }}
+                />
+              );
+            })}
+          {needsColor && needsSize && <span className="w-px h-4 bg-gray-100 mx-0.5" />}
+          {needsSize &&
+            product.sizes.map((s) => {
+              const selected = s === line.selectedSize;
+              const disabled = !selected && !sizeAvailableFor(line.selectedColor, s);
+              return (
+                <button
+                  key={s}
+                  disabled={disabled}
+                  onClick={() => !selected && onChangeVariant(line, line.selectedColor, s)}
+                  className={clsx(
+                    "px-1.5 py-0.5 rounded-md border text-[10px] font-semibold flex-shrink-0",
+                    selected ? "border-brand-500 bg-brand-50 text-brand-700" : "border-gray-200 text-gray-500",
+                    disabled && "opacity-30 line-through"
+                  )}
+                >
+                  {s}
+                </button>
+              );
+            })}
         </div>
       )}
     </div>
@@ -235,7 +270,6 @@ export default function PosScreen() {
   const [loadError, setLoadError] = useState("");
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState<string | null>(null);
-  const [expandedId, setExpandedId] = useState<string | null>(null);
   const [cart, setCart] = useState<CartLine[]>([]);
   const [successSale, setSuccessSale] = useState<PosSale | null>(null);
   const [printData, setPrintData] = useState<ReceiptData | null>(null);
@@ -278,17 +312,14 @@ export default function PosScreen() {
       next[idx] = { ...next[idx], quantity: next[idx].quantity + 1 };
       return next;
     });
-    setExpandedId(null);
   };
 
+  // Tapping a card always adds straight to the cart — no popup, no in-between
+  // step. Color/size/quantity are then set directly on the cart line.
   const handleCardTap = (product: Product) => {
     if (isProductSoldOut(product)) return;
-    const needsChoice = product.colors.length > 1 || product.sizes.length > 1;
-    if (!needsChoice) {
-      addToCart(product, product.colors[0]?.name ?? "", product.sizes[0] ?? "");
-      return;
-    }
-    setExpandedId((cur) => (cur === product.id ? null : product.id));
+    const { color, size } = defaultVariant(product, cart);
+    addToCart(product, color, size);
   };
 
   const updateCartQty = (key: string, quantity: number) => {
@@ -298,6 +329,22 @@ export default function PosScreen() {
     });
   };
   const removeCartLine = (key: string) => setCart((prev) => prev.filter((l) => cartLineKey(l) !== key));
+
+  // Re-pointing a cart line at a different color/size: merge into an existing
+  // line for that combination if there is one, otherwise just relabel this line.
+  const changeCartVariant = (line: CartLine, color: string, size: string) => {
+    setCart((prev) => {
+      const newKey = cartLineKey({ product: line.product, selectedColor: color, selectedSize: size });
+      if (newKey === cartLineKey(line)) return prev;
+      const existingIdx = prev.findIndex((l) => l !== line && cartLineKey(l) === newKey);
+      if (existingIdx !== -1) {
+        const merged = [...prev];
+        merged[existingIdx] = { ...merged[existingIdx], quantity: merged[existingIdx].quantity + line.quantity };
+        return merged.filter((l) => l !== line);
+      }
+      return prev.map((l) => (l === line ? { ...l, selectedColor: color, selectedSize: size } : l));
+    });
+  };
 
   const total = cart.reduce((s, l) => s + l.product.price * l.quantity, 0);
   const itemCount = cart.reduce((s, l) => s + l.quantity, 0);
@@ -451,7 +498,7 @@ export default function PosScreen() {
                       disabled={soldOut}
                       className={clsx(
                         "relative text-left bg-white border rounded-2xl overflow-hidden transition-all",
-                        expandedId === product.id ? "border-brand-400 ring-2 ring-brand-100" : "border-gray-100 hover:border-brand-200",
+                        "border-gray-100 hover:border-brand-200",
                         soldOut && "opacity-50 cursor-not-allowed"
                       )}
                     >
@@ -491,16 +538,6 @@ export default function PosScreen() {
                 )}
               </div>
             )}
-
-            {expandedId && (
-              <QuickPicker
-                key={expandedId}
-                product={products.find((p) => p.id === expandedId)!}
-                cart={cart}
-                onAdd={(color, size) => addToCart(products.find((p) => p.id === expandedId)!, color, size)}
-                onClose={() => setExpandedId(null)}
-              />
-            )}
           </div>
 
           {/* Cart */}
@@ -513,37 +550,16 @@ export default function PosScreen() {
 
             <div className="flex-1 overflow-y-auto p-4 space-y-3 min-h-[100px]">
               {cart.length === 0 && <p className="text-center text-gray-300 text-sm py-10">Tap a product to add it here.</p>}
-              {cart.map((line) => {
-                const key = cartLineKey(line);
-                const image = line.product.media.find((m) => m.type === "IMAGE");
-                return (
-                  <div key={key} className="flex items-center gap-3">
-                    <div className="w-12 h-12 rounded-lg overflow-hidden bg-gray-100 flex-shrink-0">
-                      {image ? (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img src={image.presignedUrl} alt="" className="w-full h-full object-cover" />
-                      ) : null}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-xs font-semibold text-gray-900 truncate">{line.product.name}</p>
-                      <p className="text-[11px] text-gray-400">{[line.selectedColor, line.selectedSize].filter(Boolean).join(" · ") || "—"}</p>
-                      <p className="text-xs font-bold text-brand-600">{formatPrice(line.product.price * line.quantity)}</p>
-                    </div>
-                    <div className="flex items-center gap-1 flex-shrink-0">
-                      <button onClick={() => updateCartQty(key, line.quantity - 1)} className="w-6 h-6 rounded-md bg-gray-100 flex items-center justify-center text-gray-500">
-                        <Minus size={11} />
-                      </button>
-                      <span className="w-5 text-center text-xs font-bold tabular-nums">{line.quantity}</span>
-                      <button onClick={() => updateCartQty(key, line.quantity + 1)} className="w-6 h-6 rounded-md bg-gray-100 flex items-center justify-center text-gray-500">
-                        <Plus size={11} />
-                      </button>
-                    </div>
-                    <button onClick={() => removeCartLine(key)} className="text-gray-300 hover:text-red-500 flex-shrink-0">
-                      <Trash2 size={14} />
-                    </button>
-                  </div>
-                );
-              })}
+              {cart.map((line) => (
+                <CartLineRow
+                  key={cartLineKey(line)}
+                  line={line}
+                  cart={cart}
+                  onChangeVariant={changeCartVariant}
+                  onQtyChange={updateCartQty}
+                  onRemove={removeCartLine}
+                />
+              ))}
             </div>
 
             <div className="p-5 border-t border-gray-100">
