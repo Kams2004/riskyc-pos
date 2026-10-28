@@ -5,3 +5,18 @@
 body {
   @apply bg-gray-50 text-gray-900;
 }
+
+/* Printing a ticket shows ONLY #print-area (see components/PrintArea.tsx) —
+   everything else in the app (nav, grid, cart) is hidden rather than
+   printed, regardless of which page triggered the print. */
+@media print {
+  body > *:not(#print-area) {
+    display: none !important;
+  }
+  #print-area {
+    display: block !important;
+  }
+  @page {
+    margin: 0;
+  }
+}

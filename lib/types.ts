@@ -72,3 +72,17 @@ export interface CartLine {
   selectedSize: string;
   quantity: number;
 }
+
+export type ReceiptPaperWidth = "MM58" | "MM80" | "A4";
+
+/** The configurable ticket — see backend PosSettings' own javadoc. */
+export interface PosSettings {
+  storeName: string;
+  storeAddress: string | null;
+  storePhone: string | null;
+  footerMessage: string | null;
+  showCashierName: boolean;
+  showSaleId: boolean;
+  paperWidth: ReceiptPaperWidth;
+  logoUrl: string | null;
+}

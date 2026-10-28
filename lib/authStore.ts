@@ -20,6 +20,8 @@ interface AdminLoginResponse {
 
 interface PosAuthStore {
   session: PosSession | null;
+  /** False until zustand/persist has read localStorage at least once. A hard page load (deep link, full refresh) renders with session===null for a tick before this flips true — any route-guard effect that redirects to /login on `!session` must wait for this first, or it bounces a genuinely logged-in cashier straight back out. */
+  hasHydrated: boolean;
   login: (email: string, password: string) => Promise<{ ok: true } | { ok: false; error: string }>;
   logout: () => void;
   hasPermission: (permission: string) => boolean;
@@ -30,6 +32,7 @@ export const usePosAuthStore = create<PosAuthStore>()(
   persist(
     (set, get) => ({
       session: null,
+      hasHydrated: false,
 
       login: async (email, password) => {
         try {
@@ -62,6 +65,26 @@ export const usePosAuthStore = create<PosAuthStore>()(
 
       hasPermission: (permission) => get().session?.permissions.includes(permission) ?? false,
     }),
-    { name: "riskyc-pos-v1", partialize: (s) => ({ session: s.session }) }
+    {
+      name: "riskyc-pos-v1",
+      partialize: (s) => ({ session: s.session }),
+    }
   )
 );
+
+// zustand's persist middleware resolves `localStorage` eagerly at module-eval
+// time; on the server (SSR/build, no `window`) that throws and the middleware
+// skips attaching `.persist` entirely, so this whole block must stay
+// server-side-inert and only ever run in the browser.
+if (typeof window !== "undefined" && usePosAuthStore.persist) {
+  const markHydrated = () => usePosAuthStore.setState({ hasHydrated: true });
+  // Against real localStorage, hydration runs synchronously inside `persist(...)`
+  // above — by the time we get here it may already be done, in which case
+  // onFinishHydration's listener would never fire. Check first, subscribe only
+  // if it's genuinely still pending.
+  if (usePosAuthStore.persist.hasHydrated()) {
+    markHydrated();
+  } else {
+    usePosAuthStore.persist.onFinishHydration(markHydrated);
+  }
+}

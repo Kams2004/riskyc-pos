@@ -20,3 +20,13 @@ export function isProductSoldOut(product: Pick<Product, "variants">): boolean {
   if (tracked.length === 0) return false;
   return tracked.every((v) => v.quantity <= 0);
 }
+
+/** For the small stock dot on a catalog card — "high" when untracked (nothing to warn about) or there's no tight limit in sight. */
+export function stockLevel(product: Pick<Product, "variants">): "out" | "low" | "high" {
+  const tracked = product.variants.filter((v) => !v.untracked);
+  if (tracked.length === 0) return "high";
+  const total = tracked.reduce((s, v) => s + Math.max(0, v.quantity), 0);
+  if (total <= 0) return "out";
+  if (total <= 5) return "low";
+  return "high";
+}

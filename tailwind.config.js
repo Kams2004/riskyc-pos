@@ -16,6 +16,15 @@ module.exports = {
           700: "#c2003d",
         },
       },
+      keyframes: {
+        slideUp: {
+          "0%": { transform: "translateY(12px)", opacity: "0" },
+          "100%": { transform: "translateY(0)", opacity: "1" },
+        },
+      },
+      animation: {
+        "slide-up": "slideUp 0.18s ease-out",
+      },
     },
   },
   plugins: [],
