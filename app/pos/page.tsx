@@ -14,11 +14,14 @@ import {
   Smartphone,
   Printer,
   TrendingUp,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 import clsx from "clsx";
 import { usePosAuthStore } from "@/lib/authStore";
 import { usePosPreferencesStore } from "@/lib/posPreferencesStore";
 import { getCatalog, createSale, getSettings, listSales } from "@/lib/api/pos";
+import { allocateGroupedLineTotals } from "@/lib/pricing";
 import { availableQuantity, isProductSoldOut, stockLevel } from "@/lib/stock";
 import { CartLine, PosCatalog, PosPaymentMethod, PosSale, PosSettings, Product } from "@/lib/types";
 import PrintArea from "@/components/PrintArea";
@@ -43,6 +46,32 @@ function formatPrice(n: number) {
 
 function cartLineKey(line: Pick<CartLine, "product" | "selectedColor" | "selectedSize">) {
   return `${line.product.id}::${line.selectedColor}::${line.selectedSize}`;
+}
+
+/**
+ * Bulk-tier pricing is pooled across every cart line of the SAME product
+ * (different color/size lines included) rather than priced per line in
+ * isolation — mirrors the backend's PricingService.allocateGroupedLineTotals
+ * exactly (same pattern as the main storefront's lib/store.ts), so the cart
+ * total always matches what the sale will actually charge.
+ */
+function computeCartLineTotals(cart: CartLine[]): Map<string, number> {
+  const byProduct = new Map<string, CartLine[]>();
+  for (const line of cart) {
+    const list = byProduct.get(line.product.id) ?? [];
+    list.push(line);
+    byProduct.set(line.product.id, list);
+  }
+  const totals = new Map<string, number>();
+  for (const group of byProduct.values()) {
+    const allocated = allocateGroupedLineTotals(
+      group[0].product.price,
+      group[0].product.bulkPrices,
+      group.map((l) => l.quantity)
+    );
+    group.forEach((line, i) => totals.set(cartLineKey(line), allocated[i]));
+  }
+  return totals;
 }
 
 const STOCK_DOT = { high: "bg-green-500", low: "bg-amber-500", out: "bg-red-500" };
@@ -73,12 +102,14 @@ function defaultVariant(product: Product, cart: CartLine[]): { color: string; si
 function CartLineRow({
   line,
   cart,
+  lineTotal,
   onChangeVariant,
   onQtyChange,
   onRemove,
 }: {
   line: CartLine;
   cart: CartLine[];
+  lineTotal: number;
   onChangeVariant: (line: CartLine, color: string, size: string) => void;
   onQtyChange: (key: string, quantity: number) => void;
   onRemove: (key: string) => void;
@@ -124,7 +155,7 @@ function CartLineRow({
         </div>
         <div className="flex-1 min-w-0">
           <p className="text-xs font-semibold text-gray-900 truncate">{product.name}</p>
-          <p className="text-xs font-bold text-brand-600">{formatPrice(product.price * line.quantity)}</p>
+          <p className="text-xs font-bold text-brand-600">{formatPrice(lineTotal)}</p>
         </div>
         <div className="flex items-center gap-1 flex-shrink-0">
           <button onClick={() => onQtyChange(key, line.quantity - 1)} className="w-6 h-6 rounded-md bg-gray-100 flex items-center justify-center text-gray-500">
@@ -184,6 +215,98 @@ function CartLineRow({
         </div>
       )}
     </div>
+  );
+}
+
+// ── Catalog card — tapping the card adds the product to the cart (unchanged
+// behavior); a product with more than one photo gets small edge tap-zones
+// and a dot indicator to browse the rest, each stopping propagation so
+// browsing photos never also adds the item. ──
+function ProductCard({
+  product,
+  soldOut,
+  level,
+  inCartQty,
+  onTap,
+}: {
+  product: Product;
+  soldOut: boolean;
+  level: "high" | "low" | "out";
+  inCartQty: number;
+  onTap: () => void;
+}) {
+  const images = product.media.filter((m) => m.type === "IMAGE");
+  const [imageIndex, setImageIndex] = useState(0);
+  const image = images[imageIndex] ?? images[0];
+
+  return (
+    <button
+      onClick={onTap}
+      disabled={soldOut}
+      className={clsx(
+        "relative text-left bg-white border rounded-2xl overflow-hidden transition-all",
+        "border-gray-100 hover:border-brand-200",
+        soldOut && "opacity-50 cursor-not-allowed"
+      )}
+    >
+      <div className="aspect-square bg-gray-100 relative">
+        {image ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={image.presignedUrl} alt={product.name} className="w-full h-full object-cover" />
+        ) : null}
+        <span className={clsx("absolute top-2 left-2 w-2.5 h-2.5 rounded-full border-2 border-white shadow", STOCK_DOT[level])} />
+        {soldOut && (
+          <span className="absolute top-2 right-2 bg-gray-900 text-white text-[10px] font-bold px-2 py-0.5 rounded-full">
+            Sold out
+          </span>
+        )}
+        {product.colors.length > 1 && (
+          <div className="absolute bottom-2 left-2 flex gap-1">
+            {product.colors.slice(0, 4).map((c) => (
+              <span key={c.name} className="w-3 h-3 rounded-full border border-white shadow" style={{ backgroundColor: c.hex }} />
+            ))}
+          </div>
+        )}
+        {inCartQty > 0 && (
+          <span className="absolute -top-1 -right-1 bg-brand-500 text-white text-[11px] font-bold w-6 h-6 rounded-full flex items-center justify-center shadow-lg border-2 border-white">
+            {inCartQty}
+          </span>
+        )}
+        {images.length > 1 && (
+          <>
+            <span
+              role="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setImageIndex((i) => (i - 1 + images.length) % images.length);
+              }}
+              className="absolute inset-y-0 left-0 w-7 flex items-center justify-center text-white/0 hover:text-white/90 hover:bg-black/10 transition-colors"
+            >
+              <ChevronLeft size={16} />
+            </span>
+            <span
+              role="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setImageIndex((i) => (i + 1) % images.length);
+              }}
+              className="absolute inset-y-0 right-0 w-7 flex items-center justify-center text-white/0 hover:text-white/90 hover:bg-black/10 transition-colors"
+            >
+              <ChevronRight size={16} />
+            </span>
+            <div className="absolute bottom-2 right-2 flex gap-1">
+              {images.map((_, i) => (
+                <span key={i} className={clsx("w-1.5 h-1.5 rounded-full", i === imageIndex ? "bg-white" : "bg-white/50")} />
+              ))}
+            </div>
+          </>
+        )}
+      </div>
+      <div className="p-2.5">
+        <p className="text-xs font-semibold text-gray-900 leading-tight line-clamp-2">{product.name}</p>
+        <p className="text-brand-600 font-bold text-sm mt-1">{formatPrice(product.price)}</p>
+      </div>
+    </button>
   );
 }
 
@@ -358,7 +481,8 @@ export default function PosScreen() {
     });
   };
 
-  const total = cart.reduce((s, l) => s + l.product.price * l.quantity, 0);
+  const lineTotals = useMemo(() => computeCartLineTotals(cart), [cart]);
+  const total = Array.from(lineTotals.values()).reduce((s, v) => s + v, 0);
   const itemCount = cart.reduce((s, l) => s + l.quantity, 0);
 
   const handleCharge = async (method: PosPaymentMethod) => {
@@ -464,50 +588,18 @@ export default function PosScreen() {
             {!loading && !loadError && (
               <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-3 overflow-y-auto pb-28">
                 {filtered.map((product) => {
-                  const image = product.media.find((m) => m.type === "IMAGE");
                   const soldOut = isProductSoldOut(product);
                   const level = stockLevel(product);
                   const inCartQty = cart.filter((l) => l.product.id === product.id).reduce((s, l) => s + l.quantity, 0);
                   return (
-                    <button
+                    <ProductCard
                       key={product.id}
-                      onClick={() => handleCardTap(product)}
-                      disabled={soldOut}
-                      className={clsx(
-                        "relative text-left bg-white border rounded-2xl overflow-hidden transition-all",
-                        "border-gray-100 hover:border-brand-200",
-                        soldOut && "opacity-50 cursor-not-allowed"
-                      )}
-                    >
-                      <div className="aspect-square bg-gray-100 relative">
-                        {image ? (
-                          // eslint-disable-next-line @next/next/no-img-element
-                          <img src={image.presignedUrl} alt={product.name} className="w-full h-full object-cover" />
-                        ) : null}
-                        <span className={clsx("absolute top-2 left-2 w-2.5 h-2.5 rounded-full border-2 border-white shadow", STOCK_DOT[level])} />
-                        {soldOut && (
-                          <span className="absolute top-2 right-2 bg-gray-900 text-white text-[10px] font-bold px-2 py-0.5 rounded-full">
-                            Sold out
-                          </span>
-                        )}
-                        {product.colors.length > 1 && (
-                          <div className="absolute bottom-2 left-2 flex gap-1">
-                            {product.colors.slice(0, 4).map((c) => (
-                              <span key={c.name} className="w-3 h-3 rounded-full border border-white shadow" style={{ backgroundColor: c.hex }} />
-                            ))}
-                          </div>
-                        )}
-                        {inCartQty > 0 && (
-                          <span className="absolute -top-1 -right-1 bg-brand-500 text-white text-[11px] font-bold w-6 h-6 rounded-full flex items-center justify-center shadow-lg border-2 border-white">
-                            {inCartQty}
-                          </span>
-                        )}
-                      </div>
-                      <div className="p-2.5">
-                        <p className="text-xs font-semibold text-gray-900 leading-tight line-clamp-2">{product.name}</p>
-                        <p className="text-brand-600 font-bold text-sm mt-1">{formatPrice(product.price)}</p>
-                      </div>
-                    </button>
+                      product={product}
+                      soldOut={soldOut}
+                      level={level}
+                      inCartQty={inCartQty}
+                      onTap={() => handleCardTap(product)}
+                    />
                   );
                 })}
                 {filtered.length === 0 && (
@@ -532,6 +624,7 @@ export default function PosScreen() {
                   key={cartLineKey(line)}
                   line={line}
                   cart={cart}
+                  lineTotal={lineTotals.get(cartLineKey(line)) ?? line.product.price * line.quantity}
                   onChangeVariant={changeCartVariant}
                   onQtyChange={updateCartQty}
                   onRemove={removeCartLine}

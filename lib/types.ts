@@ -18,6 +18,12 @@ export interface ProductColor {
   hex: string;
 }
 
+/** A "buy N for this total" tier, independent of the regular unit price — see PricingService on the backend. */
+export interface BulkPriceTier {
+  quantity: number;
+  price: number;
+}
+
 export interface Product {
   id: string;
   name: string;
@@ -28,6 +34,7 @@ export interface Product {
   variants: ProductVariant[];
   media: MediaItem[];
   hidden: boolean;
+  bulkPrices: BulkPriceTier[];
 }
 
 export interface PosCatalog {
