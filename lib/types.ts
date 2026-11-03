@@ -85,4 +85,7 @@ export interface PosSettings {
   showSaleId: boolean;
   paperWidth: ReceiptPaperWidth;
   logoUrl: string | null;
+  cashEnabled: boolean;
+  orangeMoneyEnabled: boolean;
+  mobileMoneyEnabled: boolean;
 }

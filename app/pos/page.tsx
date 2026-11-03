@@ -1,10 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
 import {
-  Store,
-  LogOut,
   Search,
   ShoppingCart,
   Plus,
@@ -13,25 +10,31 @@ import {
   X,
   Check,
   Loader2,
-  Receipt as ReceiptIcon,
   Banknote,
   Smartphone,
   Printer,
-  Settings as SettingsIcon,
   TrendingUp,
 } from "lucide-react";
 import clsx from "clsx";
 import { usePosAuthStore } from "@/lib/authStore";
+import { usePosPreferencesStore } from "@/lib/posPreferencesStore";
 import { getCatalog, createSale, getSettings, listSales } from "@/lib/api/pos";
 import { availableQuantity, isProductSoldOut, stockLevel } from "@/lib/stock";
 import { CartLine, PosCatalog, PosPaymentMethod, PosSale, PosSettings, Product } from "@/lib/types";
 import PrintArea from "@/components/PrintArea";
 import { ReceiptData } from "@/components/Receipt";
+import PosShell from "@/components/PosShell";
 
-const PAYMENT_METHODS: { value: PosPaymentMethod; label: string; icon: typeof Banknote }[] = [
-  { value: "CASH", label: "Cash", icon: Banknote },
-  { value: "ORANGE_MONEY", label: "Orange Money", icon: Smartphone },
-  { value: "MOBILE_MONEY", label: "Mobile Money", icon: Smartphone },
+const PAYMENT_METHODS: {
+  value: PosPaymentMethod;
+  label: string;
+  icon: typeof Banknote;
+  enabledKey: "cashEnabled" | "orangeMoneyEnabled" | "mobileMoneyEnabled";
+  classes: string;
+}[] = [
+  { value: "CASH", label: "Cash", icon: Banknote, enabledKey: "cashEnabled", classes: "bg-green-500 hover:bg-green-600 text-white" },
+  { value: "ORANGE_MONEY", label: "Orange Money", icon: Smartphone, enabledKey: "orangeMoneyEnabled", classes: "bg-orange-500 hover:bg-orange-600 text-white" },
+  { value: "MOBILE_MONEY", label: "Mobile Money", icon: Smartphone, enabledKey: "mobileMoneyEnabled", classes: "bg-amber-400 hover:bg-amber-500 text-gray-900" },
 ];
 
 function formatPrice(n: number) {
@@ -186,15 +189,28 @@ function CartLineRow({
 
 function CheckoutBar({
   total,
+  settings,
   onCharge,
 }: {
   total: number;
+  settings: PosSettings | null;
   onCharge: (method: PosPaymentMethod) => Promise<void>;
 }) {
+  const confirmBeforeCharge = usePosPreferencesStore((s) => s.confirmBeforeCharge);
   const [charging, setCharging] = useState<PosPaymentMethod | null>(null);
+  const [armed, setArmed] = useState<PosPaymentMethod | null>(null);
 
+  // With the "confirm before charging" preference on, the first tap arms the
+  // button (it switches to "Confirm?") and only a second tap actually charges;
+  // the arm disarms itself after a few seconds or when another method is tapped.
   const handleTap = async (method: PosPaymentMethod) => {
     if (charging) return;
+    if (confirmBeforeCharge && armed !== method) {
+      setArmed(method);
+      setTimeout(() => setArmed((cur) => (cur === method ? null : cur)), 3000);
+      return;
+    }
+    setArmed(null);
     setCharging(method);
     try {
       await onCharge(method);
@@ -203,24 +219,26 @@ function CheckoutBar({
     }
   };
 
+  const methods = settings ? PAYMENT_METHODS.filter((m) => settings[m.enabledKey]) : PAYMENT_METHODS;
+
   return (
-    <div className="grid grid-cols-1 gap-2">
-      {PAYMENT_METHODS.map((m) => {
+    <div className="grid grid-cols-3 gap-2">
+      {methods.map((m) => {
         const Icon = m.icon;
         const isCharging = charging === m.value;
+        const isArmed = armed === m.value;
         return (
           <button
             key={m.value}
             onClick={() => handleTap(m.value)}
             disabled={!!charging || total <= 0}
             className={clsx(
-              "flex items-center gap-3 px-4 py-3.5 rounded-xl font-bold text-sm transition-all disabled:opacity-40",
-              isCharging ? "bg-brand-700 text-white" : "bg-gray-900 hover:bg-brand-600 text-white"
+              "flex flex-col items-center justify-center gap-1.5 py-3.5 rounded-xl font-bold text-xs transition-all disabled:opacity-40",
+              isArmed ? "bg-gray-900 text-white ring-2 ring-offset-2 ring-gray-900" : m.classes
             )}
           >
             {isCharging ? <Loader2 size={18} className="animate-spin" /> : <Icon size={18} />}
-            {isCharging ? "Charging…" : m.label}
-            <span className="ml-auto tabular-nums">{formatPrice(total)}</span>
+            {isCharging ? "Charging…" : isArmed ? "Confirm?" : m.label}
           </button>
         );
       })}
@@ -257,11 +275,9 @@ function SuccessToast({ sale, onPrint, onDismiss }: { sale: PosSale; onPrint: ()
 }
 
 export default function PosScreen() {
-  const router = useRouter();
   const session = usePosAuthStore((s) => s.session);
   const hasHydrated = usePosAuthStore((s) => s.hasHydrated);
-  const logout = usePosAuthStore((s) => s.logout);
-  const canManage = usePosAuthStore((s) => s.hasPermission("MANAGE_POS"));
+  const autoPrintAfterSale = usePosPreferencesStore((s) => s.autoPrintAfterSale);
 
   const [catalog, setCatalog] = useState<PosCatalog | null>(null);
   const [settings, setSettings] = useState<PosSettings | null>(null);
@@ -275,11 +291,7 @@ export default function PosScreen() {
   const [printData, setPrintData] = useState<ReceiptData | null>(null);
 
   useEffect(() => {
-    if (!hasHydrated) return;
-    if (!session) {
-      router.replace("/login");
-      return;
-    }
+    if (!hasHydrated || !session) return;
     Promise.all([getCatalog(session.token), getSettings(session.token), listSales(session.token)])
       .then(([cat, settingsResp, sales]) => {
         setCatalog(cat);
@@ -290,7 +302,7 @@ export default function PosScreen() {
       })
       .catch((e) => setLoadError(e instanceof Error ? e.message : "Couldn't load the till."))
       .finally(() => setLoading(false));
-  }, [hasHydrated, session, router]);
+  }, [hasHydrated, session]);
 
   const products = catalog?.products ?? [];
   const categories = useMemo(() => Array.from(new Set(products.map((p) => p.categorySlug))).sort(), [products]);
@@ -366,6 +378,7 @@ export default function PosScreen() {
     setSuccessSale(sale);
     setTodayStats((prev) => (prev ? { count: prev.count + 1, total: prev.total + sale.total } : prev));
     getCatalog(session.token).then(setCatalog).catch(() => {});
+    if (autoPrintAfterSale) printSale(sale);
   };
 
   const printSale = (sale: PosSale) => {
@@ -388,68 +401,32 @@ export default function PosScreen() {
 
   if (!session) return null;
 
+  const headerExtra = (
+    <div className="flex items-center gap-3">
+      <div className="relative flex-1 max-w-sm">
+        <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+        <input
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search a product (name, reference…)"
+          className="w-full bg-gray-50 border border-gray-100 rounded-xl pl-9 pr-3 py-2 text-sm outline-none focus:border-brand-400 focus:bg-white"
+        />
+      </div>
+      {todayStats && (
+        <span className="hidden md:flex items-center gap-1.5 text-xs font-semibold text-gray-500 bg-gray-50 px-3 py-1.5 rounded-full whitespace-nowrap">
+          <TrendingUp size={12} className="text-brand-500" />
+          {todayStats.count} sales today · {formatPrice(todayStats.total)}
+        </span>
+      )}
+    </div>
+  );
+
   return (
     <>
-      <div className="h-screen bg-gray-50 flex flex-col overflow-hidden">
-        {/* Header */}
-        <header className="bg-white border-b border-gray-100 px-4 sm:px-6 py-3 flex items-center justify-between flex-shrink-0">
-          <div className="flex items-center gap-2.5">
-            <div className="w-9 h-9 rounded-xl bg-brand-500 flex items-center justify-center">
-              <Store size={17} className="text-white" />
-            </div>
-            <div>
-              <p className="font-bold text-gray-900 leading-none text-sm">Riskyc POS</p>
-              <p className="text-[11px] text-gray-400 mt-0.5">{session.firstName} {session.lastName}</p>
-            </div>
-          </div>
-
-          {todayStats && (
-            <div className="hidden sm:flex items-center gap-2 bg-gray-50 rounded-xl px-3.5 py-2 text-xs font-semibold text-gray-600">
-              <TrendingUp size={14} className="text-brand-500" />
-              {todayStats.count} sales today · {formatPrice(todayStats.total)}
-            </div>
-          )}
-
-          <div className="flex items-center gap-1.5">
-            <button
-              onClick={() => router.push("/sales")}
-              className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold text-gray-600 hover:bg-gray-100"
-            >
-              <ReceiptIcon size={14} /> <span className="hidden sm:inline">Sales</span>
-            </button>
-            {canManage && (
-              <button
-                onClick={() => router.push("/settings")}
-                className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold text-gray-600 hover:bg-gray-100"
-              >
-                <SettingsIcon size={14} /> <span className="hidden sm:inline">Settings</span>
-              </button>
-            )}
-            <button
-              onClick={() => {
-                logout();
-                router.replace("/login");
-              }}
-              className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold text-gray-600 hover:bg-gray-100"
-            >
-              <LogOut size={14} /> <span className="hidden sm:inline">Log out</span>
-            </button>
-          </div>
-        </header>
-
+      <PosShell title="Sale" headerExtra={headerExtra}>
         <div className="flex-1 flex flex-col lg:flex-row min-h-0">
           {/* Catalog */}
           <div className="relative flex-1 flex flex-col min-h-0 p-4 sm:p-6">
-            <div className="relative mb-3">
-              <Search size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400" />
-              <input
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search products…"
-                className="w-full bg-white border border-gray-200 rounded-xl pl-10 pr-4 py-2.5 text-sm outline-none focus:border-brand-400"
-              />
-            </div>
-
             {categories.length > 1 && (
               <div className="flex gap-2 overflow-x-auto pb-3 -mx-1 px-1">
                 <button
@@ -567,11 +544,11 @@ export default function PosScreen() {
                 <span className="text-sm font-semibold text-gray-500">Total</span>
                 <span className="text-2xl font-bold text-gray-900">{formatPrice(total)}</span>
               </div>
-              <CheckoutBar total={total} onCharge={handleCharge} />
+              <CheckoutBar total={total} settings={settings} onCharge={handleCharge} />
             </div>
           </div>
         </div>
-      </div>
+      </PosShell>
 
       {successSale && (
         <SuccessToast

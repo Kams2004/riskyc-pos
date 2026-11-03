@@ -16,6 +16,10 @@ module.exports = {
           700: "#c2003d",
         },
       },
+      fontFamily: {
+        sans: ["var(--font-inter)", "sans-serif"],
+        display: ["var(--font-playfair)", "serif"],
+      },
       keyframes: {
         slideUp: {
           "0%": { transform: "translateY(12px)", opacity: "0" },

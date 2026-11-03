@@ -2,6 +2,9 @@
 
 export const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8080";
 
+/** The main Riskyc Fashion admin app — cashier/role management lives there, not here (see app/settings/users). */
+export const ADMIN_URL = process.env.NEXT_PUBLIC_ADMIN_URL || "http://localhost:3000";
+
 export class ApiError extends Error {
   status: number;
   constructor(status: number, message: string) {
