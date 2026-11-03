@@ -67,7 +67,7 @@ export default function TicketSettingsPage() {
   return (
     <PosShell title="Ticket de caisse">
       <div className="flex-1 overflow-y-auto">
-        <div className="max-w-4xl mx-auto p-4 sm:p-6">
+        <div className="max-w-5xl mx-auto p-4 sm:p-6 lg:p-8">
           <Link href="/settings" className="inline-flex items-center gap-1 text-xs font-semibold text-gray-400 hover:text-gray-600 mb-4">
             <ChevronLeft size={14} /> Back to Settings
           </Link>

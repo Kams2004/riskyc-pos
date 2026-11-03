@@ -195,7 +195,7 @@ export default function SalesHistoryPage() {
     <>
       <PosShell title="Sales History">
         <div className="flex-1 overflow-y-auto">
-          <div className="max-w-6xl mx-auto p-4 sm:p-6 space-y-5">
+          <div className="p-4 sm:p-6 lg:p-8 space-y-5">
             <p className="text-sm text-gray-400 -mt-2">View, search and manage every sale rung up at this till.</p>
 
             {/* Stats */}

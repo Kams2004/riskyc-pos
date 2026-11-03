@@ -67,7 +67,7 @@ export default function ReconciliationPage() {
   return (
     <PosShell title="Reconciliation">
       <div className="flex-1 overflow-y-auto">
-        <div className="max-w-6xl mx-auto p-4 sm:p-6 space-y-5">
+        <div className="p-4 sm:p-6 lg:p-8 space-y-5">
           <p className="text-sm text-gray-400 -mt-2">Sales that pushed a size/color's stock negative — likely sold here and online around the same time.</p>
 
           {/* Stats */}

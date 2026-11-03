@@ -30,9 +30,9 @@ export default function SettingsHubPage() {
   return (
     <PosShell title="Settings">
       <div className="flex-1 overflow-y-auto">
-        <div className="max-w-3xl mx-auto p-4 sm:p-6">
+        <div className="max-w-5xl mx-auto p-4 sm:p-6 lg:p-8">
           <p className="text-sm text-gray-400 mb-5">Configure this point of sale to fit your needs.</p>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {TILES.map((tile) => {
               const Icon = tile.icon;
               return (
