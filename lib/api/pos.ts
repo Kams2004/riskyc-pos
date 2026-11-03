@@ -1,5 +1,5 @@
 import { apiFetch, API_BASE_URL } from "@/lib/apiClient";
-import { PosCatalog, PosPaymentMethod, PosSale, PosSettings } from "@/lib/types";
+import { PosCatalog, PosPaymentMethod, PosReconciliationLine, PosSale, PosSettings } from "@/lib/types";
 
 export function getCatalog(token: string) {
   return apiFetch<PosCatalog>("/api/pos/catalog", { token });
@@ -11,6 +11,14 @@ export function listSales(token: string) {
 
 export function listFlaggedSales(token: string) {
   return apiFetch<PosSale[]>("/api/pos/sales/flagged", { token });
+}
+
+export function listReconciliation(token: string) {
+  return apiFetch<PosReconciliationLine[]>("/api/pos/reconciliation", { token });
+}
+
+export function resolveReconciliation(token: string, itemId: string) {
+  return apiFetch<PosReconciliationLine>(`/api/pos/reconciliation/${itemId}/resolve`, { method: "POST", token });
 }
 
 export interface CreateSaleInput {
