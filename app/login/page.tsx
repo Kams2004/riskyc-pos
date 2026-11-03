@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import Image from "next/image";
 import { User, Lock, Eye, EyeOff, Loader2, CreditCard, Store, Printer } from "lucide-react";
 import clsx from "clsx";
 import { usePosAuthStore } from "@/lib/authStore";
@@ -30,12 +31,17 @@ export default function LoginPage() {
 
   return (
     <div className="min-h-screen relative flex items-center justify-center px-4 py-10 overflow-hidden bg-gray-950">
-      {/* Ambient boutique-at-night backdrop — a gradient wash rather than a stock
-          photo, kept in the brand's pink/plum range. */}
-      <div className="absolute inset-0 bg-[radial-gradient(ellipse_80%_60%_at_50%_0%,rgba(255,26,94,0.25),transparent),radial-gradient(ellipse_60%_50%_at_100%_100%,rgba(122,0,39,0.4),transparent)]" />
-      <div className="absolute inset-0 bg-gray-950/40" />
-      <div className="absolute -top-24 -left-24 w-96 h-96 bg-brand-600/20 rounded-full blur-3xl" />
-      <div className="absolute -bottom-24 -right-24 w-96 h-96 bg-brand-900/40 rounded-full blur-3xl" />
+      {/* The till's own counter — printer, scanner, the boutique floor behind it. */}
+      <Image
+        src="/login-background.png"
+        alt=""
+        fill
+        priority
+        sizes="100vw"
+        className="object-cover"
+      />
+      <div className="absolute inset-0 bg-gradient-to-t from-gray-950 via-gray-950/70 to-gray-950/30" />
+      <div className="absolute inset-0 bg-brand-900/10" />
 
       <div className="relative w-full max-w-sm">
         {/* Logo */}
