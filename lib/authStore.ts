@@ -10,11 +10,13 @@ export interface PosSession {
   email: string;
   roleName: string;
   permissions: string[];
+  /** Null for platform staff (the flagship-store till, sees/sells every seller's products) — set for a seller's own scoped till. */
+  enterpriseId: string | null;
 }
 
 interface AdminLoginResponse {
   token: string;
-  user: { id: string; firstName: string; lastName: string; email: string; roleId: string; roleName: string };
+  user: { id: string; firstName: string; lastName: string; email: string; roleId: string; roleName: string; enterpriseId: string | null };
   permissions: string[];
 }
 
@@ -52,6 +54,7 @@ export const usePosAuthStore = create<PosAuthStore>()(
               email: data.user.email,
               roleName: data.user.roleName,
               permissions: data.permissions,
+              enterpriseId: data.user.enterpriseId ?? null,
             },
           });
           return { ok: true };

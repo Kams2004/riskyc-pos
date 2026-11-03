@@ -60,6 +60,7 @@ export interface PosSale {
   clientSaleId: string;
   cashierId: string | null;
   cashierName: string;
+  enterpriseId: string | null;
   items: PosSaleItem[];
   total: number;
   paymentMethod: PosPaymentMethod;
