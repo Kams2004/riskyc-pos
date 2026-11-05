@@ -8,6 +8,8 @@ import { usePosAuthStore } from "@/lib/authStore";
 import { listOrders } from "@/lib/api/pos";
 import { OnlineOrder, OrderStatus } from "@/lib/types";
 import PosShell from "@/components/PosShell";
+import Pagination from "@/components/Pagination";
+import { usePagination } from "@/lib/usePagination";
 
 const STATUS_META: Record<OrderStatus, { label: string; classes: string }> = {
   PENDING: { label: "Pending", classes: "bg-gray-100 text-gray-600" },
@@ -88,6 +90,8 @@ export default function OrdersPage() {
     });
   }, [orders, tab, search]);
 
+  const pagination = usePagination(filtered, 10, [tab, search]);
+
   return (
     <PosShell title="Orders">
       <div className="flex-1 overflow-y-auto">
@@ -132,6 +136,7 @@ export default function OrdersPage() {
           ) : filtered.length === 0 ? (
             <p className="text-center text-gray-400 py-16 text-sm">No orders here.</p>
           ) : (
+            <>
             <div className="bg-white border border-gray-200 shadow-sm rounded-2xl overflow-hidden overflow-x-auto">
               <table className="w-full min-w-[860px] border-collapse text-sm">
                 <thead>
@@ -147,7 +152,7 @@ export default function OrdersPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200">
-                  {filtered.map((order) => {
+                  {pagination.pageItems.map((order) => {
                     const qty = order.items.reduce((n, i) => n + i.quantity, 0);
                     const expanded = expandedId === order.id;
                     const c = order.customerInfo;
@@ -238,6 +243,15 @@ export default function OrdersPage() {
                 </tbody>
               </table>
             </div>
+            <Pagination
+              page={pagination.page}
+              totalPages={pagination.totalPages}
+              total={pagination.total}
+              pageSize={pagination.pageSize}
+              noun="orders"
+              onPageChange={pagination.setPage}
+            />
+            </>
           )}
         </div>
       </div>

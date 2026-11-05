@@ -27,6 +27,8 @@ import { CartLine, PosCatalog, PosPaymentMethod, PosSale, PosSettings, Product }
 import PrintArea from "@/components/PrintArea";
 import { ReceiptData } from "@/components/Receipt";
 import PosShell from "@/components/PosShell";
+import Pagination from "@/components/Pagination";
+import { usePagination } from "@/lib/usePagination";
 
 const PAYMENT_METHODS: {
   value: PosPaymentMethod;
@@ -501,6 +503,8 @@ export default function PosScreen() {
       return true;
     });
   }, [products, search, category]);
+  // 24 fills a 2-, 3- or 4-column grid evenly; search and category chips still look across every product.
+  const catalogPage = usePagination(filtered, 24, [search, category]);
 
   const addToCart = (product: Product, selectedColor: string, selectedSize: string) => {
     setCart((prev) => {
@@ -622,7 +626,7 @@ export default function PosScreen() {
           {/* Catalog */}
           <div className="relative flex-1 flex flex-col min-h-0 p-4 sm:p-6">
             {categories.length > 1 && (
-              <div className="flex gap-2 overflow-x-auto pb-3 -mx-1 px-1">
+              <div className="flex-shrink-0 flex gap-2 overflow-x-auto pb-3 -mx-1 px-1">
                 <button
                   onClick={() => setCategory(null)}
                   className={clsx(
@@ -656,8 +660,11 @@ export default function PosScreen() {
             {loadError && <div className="text-sm text-red-600 bg-red-50 rounded-xl px-4 py-3">{loadError}</div>}
 
             {!loading && !loadError && (
-              <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-3 overflow-y-auto pb-28">
-                {filtered.map((product) => {
+              // The scroll area is its own box so the grid inside keeps natural row heights — when the grid itself
+              // was the flex child that scrolled, WebKit (the desktop app's engine) squashed every card to fit.
+              <div className="flex-1 min-h-0 overflow-y-auto pb-28 space-y-4">
+              <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-3 content-start">
+                {catalogPage.pageItems.map((product) => {
                   const soldOut = isProductSoldOut(product);
                   const level = stockLevel(product);
                   const inCartQty = cart.filter((l) => l.product.id === product.id).reduce((s, l) => s + l.quantity, 0);
@@ -675,6 +682,15 @@ export default function PosScreen() {
                 {filtered.length === 0 && (
                   <p className="col-span-full text-center text-gray-400 text-sm py-10">No products match &ldquo;{search}&rdquo;.</p>
                 )}
+              </div>
+              <Pagination
+                page={catalogPage.page}
+                totalPages={catalogPage.totalPages}
+                total={catalogPage.total}
+                pageSize={catalogPage.pageSize}
+                noun="products"
+                onPageChange={catalogPage.setPage}
+              />
               </div>
             )}
           </div>

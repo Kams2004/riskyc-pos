@@ -13,8 +13,6 @@ import {
   Eye,
   Printer,
   Trash2,
-  ChevronLeft,
-  ChevronRight,
   ChevronDown,
   ChevronUp,
   AlertTriangle,
@@ -26,6 +24,7 @@ import { OnlineOrder, PosSale, PosSettings, PosPaymentMethod } from "@/lib/types
 import PrintArea from "@/components/PrintArea";
 import { ReceiptData } from "@/components/Receipt";
 import PosShell from "@/components/PosShell";
+import Pagination from "@/components/Pagination";
 
 const PAGE_SIZE = 10;
 
@@ -497,45 +496,14 @@ export default function SalesHistoryPage() {
                 </div>
 
                 {/* Pagination */}
-                <div className="flex items-center justify-between flex-wrap gap-3">
-                  <p className="text-xs text-gray-400">
-                    Showing {(safePage - 1) * PAGE_SIZE + 1}–{Math.min(safePage * PAGE_SIZE, filtered.length)} of {filtered.length} sales
-                  </p>
-                  {totalPages > 1 && (
-                    <div className="flex items-center gap-1">
-                      <button
-                        onClick={() => setPage((p) => Math.max(1, p - 1))}
-                        disabled={safePage === 1}
-                        className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold text-gray-500 hover:bg-gray-100 disabled:opacity-30"
-                      >
-                        <ChevronLeft size={13} /> Prev
-                      </button>
-                      {Array.from({ length: totalPages }, (_, i) => i + 1)
-                        .filter((p) => p === 1 || p === totalPages || Math.abs(p - safePage) <= 1)
-                        .map((p, idx, arr) => (
-                          <span key={p} className="flex items-center">
-                            {idx > 0 && arr[idx - 1] !== p - 1 && <span className="px-1 text-xs text-gray-300">…</span>}
-                            <button
-                              onClick={() => setPage(p)}
-                              className={clsx(
-                                "w-7 h-7 rounded-lg text-xs font-semibold",
-                                p === safePage ? "bg-brand-500 text-white" : "text-gray-500 hover:bg-gray-100"
-                              )}
-                            >
-                              {p}
-                            </button>
-                          </span>
-                        ))}
-                      <button
-                        onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                        disabled={safePage === totalPages}
-                        className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold text-gray-500 hover:bg-gray-100 disabled:opacity-30"
-                      >
-                        Next <ChevronRight size={13} />
-                      </button>
-                    </div>
-                  )}
-                </div>
+                <Pagination
+                  page={safePage}
+                  totalPages={totalPages}
+                  total={filtered.length}
+                  pageSize={PAGE_SIZE}
+                  noun="sales"
+                  onPageChange={setPage}
+                />
               </>
             )}
           </div>

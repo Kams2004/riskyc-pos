@@ -1,6 +1,6 @@
 [package]
 name = "riskyc-pos"
-version = "0.1.3"
+version = "0.1.4"
 description = "Riskyc Fashion point of sale"
 authors = ["Riskyc Fashion"]
 edition = "2021"

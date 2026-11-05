@@ -10,6 +10,8 @@ import { listAdminProducts, deleteProduct } from "@/lib/api/products";
 import { isProductSoldOut, stockLevel } from "@/lib/stock";
 import { Product } from "@/lib/types";
 import PosShell from "@/components/PosShell";
+import Pagination from "@/components/Pagination";
+import { usePagination } from "@/lib/usePagination";
 
 const EDIT_PERMISSIONS = [
   "UPDATE_PRODUCT_INFO",
@@ -68,6 +70,8 @@ export default function ProductsPage() {
     return q ? products.filter((p) => `${p.name} ${p.categorySlug}`.toLowerCase().includes(q)) : products;
   }, [products, search]);
 
+  const pagination = usePagination(filtered, 10, search);
+
   const handleDelete = async (product: Product) => {
     if (!session) return;
     if (!window.confirm(`Delete "${product.name}"? It disappears from the online shop and the till. This can't be undone.`)) return;
@@ -123,6 +127,7 @@ export default function ProductsPage() {
               {products.length === 0 ? "No products yet." : "No products match your search."}
             </p>
           ) : (
+            <>
             <div className="bg-white border border-gray-200 shadow-sm rounded-2xl overflow-hidden overflow-x-auto">
               <table className="w-full min-w-[760px] border-collapse text-sm">
                 <thead>
@@ -136,7 +141,7 @@ export default function ProductsPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200">
-                  {filtered.map((product) => {
+                  {pagination.pageItems.map((product) => {
                     const image = product.media.find((m) => m.type === "IMAGE");
                     const stock = stockLabel(product);
                     return (
@@ -199,6 +204,15 @@ export default function ProductsPage() {
                 </tbody>
               </table>
             </div>
+            <Pagination
+              page={pagination.page}
+              totalPages={pagination.totalPages}
+              total={pagination.total}
+              pageSize={pagination.pageSize}
+              noun="products"
+              onPageChange={pagination.setPage}
+            />
+            </>
           )}
         </div>
       </div>

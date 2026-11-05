@@ -7,6 +7,8 @@ import { usePosAuthStore } from "@/lib/authStore";
 import { listReconciliation, resolveReconciliation } from "@/lib/api/pos";
 import { PosReconciliationLine } from "@/lib/types";
 import PosShell from "@/components/PosShell";
+import Pagination from "@/components/Pagination";
+import { usePagination } from "@/lib/usePagination";
 
 /**
  * Per-line stock discrepancies — a sale that oversold a (color, size) goes
@@ -50,6 +52,8 @@ export default function ReconciliationPage() {
     if (!q) return visible;
     return visible.filter((l) => [l.productName, l.saleId, l.cashierName].join(" ").toLowerCase().includes(q));
   }, [visible, search]);
+
+  const pagination = usePagination(filtered, 10, [tab, search]);
 
   const handleResolve = async (line: PosReconciliationLine) => {
     if (!session) return;
@@ -129,6 +133,7 @@ export default function ReconciliationPage() {
               <p className="text-gray-400 text-sm">{tab === "pending" ? "Nothing to reconcile." : "Nothing resolved yet."}</p>
             </div>
           ) : (
+            <>
             <div className="bg-white border border-gray-100 rounded-2xl overflow-hidden overflow-x-auto">
               <table className="w-full min-w-[920px] border-collapse text-sm">
                 <thead>
@@ -146,7 +151,7 @@ export default function ReconciliationPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-50">
-                  {filtered.map((line) => (
+                  {pagination.pageItems.map((line) => (
                     <tr key={line.itemId} className="hover:bg-gray-50/60 transition-colors">
                       <td className="px-4 py-3 text-xs text-gray-500 whitespace-nowrap">
                         {new Date(line.soldAt).toLocaleDateString("en-GB", { day: "2-digit", month: "short" })}
@@ -196,6 +201,15 @@ export default function ReconciliationPage() {
                 </tbody>
               </table>
             </div>
+            <Pagination
+              page={pagination.page}
+              totalPages={pagination.totalPages}
+              total={pagination.total}
+              pageSize={pagination.pageSize}
+              noun="lines"
+              onPageChange={pagination.setPage}
+            />
+            </>
           )}
         </div>
       </div>
