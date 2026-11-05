@@ -158,10 +158,31 @@ export default function ProductForm({ initial }: { initial?: Product }) {
     return null;
   };
 
-  const stockEntries = (onlyChangedFrom?: Record<string, string>) =>
-    stockCells
-      .filter(({ key }) => (stock[key] ?? "") !== "" && (!onlyChangedFrom || stock[key] !== (onlyChangedFrom[key] ?? "")))
-      .map(({ color, size, key }) => ({ colorName: color, size, quantity: Number(stock[key]) }));
+  /**
+   * What to send so the server ends up with exactly what the boxes show. `original` is the saved product (absent for a
+   * new one). All boxes empty = unlimited: a product that was counted gets every variant marked untracked again. Any
+   * number = counted: every box that changed is sent, an emptied one as 0, and a variant that was unlimited before is
+   * sent too so it starts being counted (an empty box then really means none left, as the hint says).
+   */
+  const stockEntries = (original?: Product): productsApi.StockEntry[] => {
+    const before = original ? stockFromVariants(original) : {};
+    const wasUnlimited = new Set((original?.variants ?? []).filter((v) => v.untracked).map((v) => variantKey(v.colorName, v.size)));
+    const wasCounted = (original?.variants ?? []).some((v) => !v.untracked);
+
+    if (!stockTracked) {
+      if (!wasCounted) return [];
+      const all = new Map<string, { colorName: string; size: string }>();
+      (original?.variants ?? []).forEach((v) => all.set(variantKey(v.colorName, v.size), { colorName: v.colorName, size: v.size }));
+      stockCells.forEach(({ color, size, key }) => all.set(key, { colorName: color, size }));
+      return Array.from(all.values()).map((v) => ({ ...v, quantity: 0, untracked: true }));
+    }
+
+    return stockCells
+      .filter(({ key }) =>
+        original ? (stock[key] ?? "") !== (before[key] ?? "") || wasUnlimited.has(key) : (stock[key] ?? "") !== ""
+      )
+      .map(({ color, size, key }) => ({ colorName: color, size, quantity: Number(stock[key] || 0), untracked: false }));
+  };
 
   const handleSave = async () => {
     const problem = validate();
@@ -236,7 +257,7 @@ export default function ProductForm({ initial }: { initial?: Product }) {
         if (canColors && colorIdentity(colors) !== colorIdentity(p.colors)) {
           await productsApi.updateProductColors(p.id, colors.map((c) => ({ id: c.id, name: c.name.trim(), hex: c.hex })), token);
         }
-        const changedStock = canStock ? stockEntries(stockFromVariants(p)) : [];
+        const changedStock = canStock ? stockEntries(p) : [];
         if (changedStock.length > 0) await productsApi.updateProductStock(p.id, changedStock, token);
 
         if (canImages) {
@@ -523,6 +544,20 @@ export default function ProductForm({ initial }: { initial?: Product }) {
                 : "Leave every box empty for unlimited stock, or enter quantities to start counting stock."
             }
           >
+            <div className="flex items-center justify-between gap-3 bg-gray-50 rounded-xl px-3.5 py-2.5 mb-3">
+              <div>
+                <p className="text-sm font-semibold text-gray-900">Unlimited stock</p>
+                <p className="text-[11px] text-gray-500">Never sells out. Type a quantity in any box to start counting stock.</p>
+              </div>
+              <ToggleSwitch
+                checked={!stockTracked}
+                disabled={!canStock}
+                onChange={(unlimited) =>
+                  // On: empty every box. Off: start every box at 0 so the boxes can be filled in.
+                  setStock(unlimited ? {} : Object.fromEntries(stockCells.map(({ key }) => [key, "0"])))
+                }
+              />
+            </div>
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>

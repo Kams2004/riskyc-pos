@@ -84,7 +84,15 @@ export function updateProductColors(id: string, colors: Pick<ProductColor, "id" 
 }
 
 /** colorName/size are "" for a product without colors/sizes, matching ProductVariant's convention. */
-export function updateProductStock(id: string, variants: { colorName: string; size: string; quantity: number }[], token: string) {
+/** One (color, size) stock row. `untracked: true` makes it unlimited (quantity ignored); a server without that field just ignores it. */
+export interface StockEntry {
+  colorName: string;
+  size: string;
+  quantity: number;
+  untracked?: boolean;
+}
+
+export function updateProductStock(id: string, variants: StockEntry[], token: string) {
   return apiFetch<Product>(`/api/products/${id}/stock`, { method: "PATCH", token, body: JSON.stringify({ variants }) });
 }
 
