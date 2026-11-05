@@ -30,7 +30,7 @@ import PosShell from "@/components/PosShell";
 import Pagination from "@/components/Pagination";
 import { usePagination } from "@/lib/usePagination";
 import { usePosCartStore } from "@/lib/cartStore";
-import { isDesktop } from "@/lib/desktop";
+import { desktop, isDesktop } from "@/lib/desktop";
 import { useTillStore } from "@/lib/tillStore";
 import { OfflineSaveError, QueuedSale, pendingSales, saleRefOf, queuedSaleAsPosSale, useOfflineSalesStore, withPendingStockTaken } from "@/lib/offlineSales";
 import { usePhotoSrc } from "@/lib/photoCache";
@@ -502,20 +502,51 @@ export default function PosScreen() {
 
   useEffect(() => {
     if (!hasHydrated || !session) return;
-    Promise.all([
-      getCatalog(session.token),
-      getSettings(session.token),
-      // Optional for the till to work: offline, the catalog comes from the offline copy and today's totals just start at 0.
-      listSales(session.token).catch(() => []),
-      listOnlineSales(session.token).catch(() => []),
-    ])
-      .then(([cat, settingsResp, sales, onlineSales]) => {
-        setCatalog(cat);
-        // A basket kept from earlier picks up any price/stock change made since it was filled.
-        // …with stock already sold by sales still waiting on this till taken off, like the catalog shown.
-        const serverIds = new Set(sales.map((s) => s.clientSaleId));
-        refreshCartProducts(withPendingStockTaken(cat.products, pendingSales(useOfflineSalesStore.getState().sales, serverIds)));
-        setSettings(settingsResp);
+    let cancelled = false;
+    let shown = false;
+    const showCatalog = (cat: PosCatalog) => {
+      if (cancelled) return;
+      shown = true;
+      setCatalog(cat);
+      setLoadError("");
+      setLoading(false);
+      // A basket kept from earlier picks up any price/stock change made since it was filled — with stock already
+      // sold by sales still waiting on this till taken off, like the catalog shown.
+      refreshCartProducts(withPendingStockTaken(cat.products, pendingSales(useOfflineSalesStore.getState().sales)));
+    };
+
+    // 1. Desktop app: the till's saved copy goes on screen at once, so a dropped connection never blocks selling.
+    if (isDesktop()) {
+      Promise.all([desktop.cacheGet<PosCatalog>("catalog"), desktop.cacheGet<PosSettings>("settings")])
+        .then(([cachedCatalog, cachedSettings]) => {
+          if (cancelled) return;
+          if (cachedSettings) setSettings((current) => current ?? cachedSettings);
+          if (cachedCatalog && !shown) showCatalog(cachedCatalog);
+        })
+        .catch(() => {});
+    }
+
+    // 2. The fresh copy replaces it when the server answers (getCatalog falls back to the saved copy itself).
+    Promise.all([getCatalog(session.token), getSettings(session.token)])
+      .then(([cat, settingsResp]) => {
+        showCatalog(cat);
+        if (!cancelled) setSettings(settingsResp);
+      })
+      .catch((e) => {
+        if (cancelled || shown) return;
+        setLoadError(
+          e instanceof ApiError
+            ? e.message
+            : "Can't reach the server and this till has no saved copy of the catalog yet. Connect once to download it."
+        );
+        setLoading(false);
+      });
+
+    // 3. Today's totals load on their own and never hold up the products. Offline, they start from the server's
+    //    last figure (none) and the sales waiting on this till are added on top.
+    Promise.all([listSales(session.token).catch(() => null), listOnlineSales(session.token).catch(() => [])]).then(
+      ([sales, onlineSales]) => {
+        if (cancelled || !sales) return;
         const today = new Date().toDateString();
         const todaySales = sales.filter((s) => !s.voided && new Date(s.soldAt).toDateString() === today);
         const todayOnline = onlineSales.filter((o) => o.packagingCompletedAt && new Date(o.packagingCompletedAt).toDateString() === today);
@@ -524,15 +555,12 @@ export default function PosScreen() {
           count: todaySales.length + todayOnline.length,
           total: todaySales.reduce((s, x) => s + x.total, 0) + todayOnline.reduce((s, x) => s + x.total, 0),
         });
-      })
-      .catch((e) =>
-        setLoadError(
-          e instanceof ApiError
-            ? e.message
-            : "Can't reach the server, so the catalog couldn't load. Check the connection, then reload this page."
-        )
-      )
-      .finally(() => setLoading(false));
+      }
+    );
+
+    return () => {
+      cancelled = true;
+    };
   }, [hasHydrated, session, refreshCartProducts, syncedVersion]);
 
   // Stock already sold by sales still waiting to sync is taken off, so the till never offers those units again.
@@ -639,8 +667,9 @@ export default function PosScreen() {
     let sale: PosSale;
     let saleDiscount: number;
     let offline = false;
-    if (canQueue && session.offline) {
-      // Signed in offline: there's no server token to record with, so the till's own sync uploads it.
+    if (canQueue && (session.offline || !useTillStore.getState().online)) {
+      // Signed in offline (no server token to record with), or already known to be offline: keep it on the till
+      // straight away instead of making the customer wait for the server to time out. The till's sync uploads it.
       sale = queuedSaleAsPosSale(await saveOffline(method, clientSaleId, soldAt));
       saleDiscount = discount;
       offline = true;
@@ -711,6 +740,12 @@ export default function PosScreen() {
 
   if (!session) return null;
 
+  /** Back to the full list: no search text, no category chip, first page. */
+  const clearFilters = () => {
+    setSearch("");
+    setCategory(null);
+  };
+
   const headerExtra = (
     <div className="flex items-center gap-3">
       <div className="relative flex-1 max-w-sm">
@@ -718,9 +753,21 @@ export default function PosScreen() {
         <input
           value={search}
           onChange={(e) => setSearch(e.target.value)}
+          onKeyDown={(e) => e.key === "Escape" && clearFilters()}
           placeholder="Search a product (name, reference…)"
-          className="w-full bg-gray-50 border border-gray-100 rounded-xl pl-9 pr-3 py-2 text-sm outline-none focus:border-brand-400 focus:bg-white"
+          className="w-full bg-gray-50 border border-gray-100 rounded-xl pl-9 pr-9 py-2 text-sm outline-none focus:border-brand-400 focus:bg-white"
         />
+        {(search || category) && (
+          <button
+            type="button"
+            onClick={clearFilters}
+            title="Clear the search and show every product"
+            aria-label="Clear the search and show every product"
+            className="absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded-lg text-gray-400 hover:bg-gray-200 hover:text-gray-700"
+          >
+            <X size={14} />
+          </button>
+        )}
       </div>
       {(todayStats || waitingToday.length > 0) && (
         <span className="hidden md:flex items-center gap-1.5 text-xs font-semibold text-gray-500 bg-gray-50 px-3 py-1.5 rounded-full whitespace-nowrap">

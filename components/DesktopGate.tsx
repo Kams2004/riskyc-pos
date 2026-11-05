@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Loader2, MonitorSmartphone } from "lucide-react";
-import { API_BASE_URL } from "@/lib/apiClient";
+import { API_BASE_URL, fetchWithTimeout } from "@/lib/apiClient";
 import { desktop, isDesktop, TillDevice } from "@/lib/desktop";
 import { useTillStore } from "@/lib/tillStore";
 import { usePosAuthStore } from "@/lib/authStore";
@@ -13,13 +13,17 @@ import { PosCatalog } from "@/lib/types";
 const HEARTBEAT_MS = 15_000;
 const CATALOG_SYNC_MS = 60_000;
 /** While sales are waiting, retry the upload this often (on top of every successful check-in). */
-const SALES_SYNC_MS = 30_000;
+const SALES_SYNC_MS = 10_000;
 
-function deviceFetch(device: TillDevice, path: string, init: RequestInit = {}) {
-  return fetch(`${API_BASE_URL}${path}`, {
-    ...init,
-    headers: { "Content-Type": "application/json", "X-Device-Token": device.deviceToken, ...(init.headers ?? {}) },
-  });
+function deviceFetch(device: TillDevice, path: string, init: RequestInit = {}, timeoutMs = 8_000) {
+  return fetchWithTimeout(
+    `${API_BASE_URL}${path}`,
+    {
+      ...init,
+      headers: { "Content-Type": "application/json", "X-Device-Token": device.deviceToken, ...(init.headers ?? {}) },
+    },
+    timeoutMs
+  );
 }
 
 /** Keeps the till checked in, uploads sales made offline, and keeps its offline copy of the catalog, photos and ticket settings fresh. */
@@ -90,11 +94,17 @@ function useTillSync(device: TillDevice | null, onRevoked: () => void) {
       })
       .then(syncCatalog);
     const beat = setInterval(heartbeat, HEARTBEAT_MS);
+    // The moment the connection comes back, check in (which uploads waiting sales) and refresh the catalog,
+    // instead of waiting for the next scheduled beat.
+    const unsubscribe = useTillStore.subscribe((state, prev) => {
+      if (state.online && !prev.online) heartbeat().then(syncCatalog);
+    });
     const sync = setInterval(syncCatalog, CATALOG_SYNC_MS);
     const salesSync = setInterval(() => useOfflineSalesStore.getState().syncNow(), SALES_SYNC_MS);
     return () => {
       cancelled = true;
       clearInterval(beat);
+      unsubscribe();
       clearInterval(sync);
       clearInterval(salesSync);
     };

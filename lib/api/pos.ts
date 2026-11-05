@@ -59,7 +59,9 @@ export interface CreateSaleInput {
 }
 
 export function createSale(token: string, data: CreateSaleInput) {
-  return apiFetch<PosSale>("/api/pos/sales", { method: "POST", token, body: JSON.stringify(data) });
+  // 15s, then the sale is kept on the till; if it did reach the server after all, the later upload is a no-op
+  // (same clientSaleId).
+  return apiFetch<PosSale>("/api/pos/sales", { method: "POST", token, body: JSON.stringify(data), timeoutMs: 15_000 });
 }
 
 export function voidSale(token: string, saleId: string) {

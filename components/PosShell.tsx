@@ -9,6 +9,7 @@ import { usePosAuthStore } from "@/lib/authStore";
 import { canReachApi } from "@/lib/apiClient";
 import { allowedNavItems, navItemFor } from "@/lib/posNav";
 import OfflineSalesBadge from "@/components/OfflineSalesBadge";
+import { useTillStore } from "@/lib/tillStore";
 
 function useSessionRefresh(active: boolean) {
   const refreshSession = usePosAuthStore((s) => s.refreshSession);
@@ -24,17 +25,28 @@ function useSessionRefresh(active: boolean) {
   }, [active, refreshSession]);
 }
 
-/** Real network probe, polled periodically — not navigator.onLine alone (see apiClient.ts#canReachApi). */
+/**
+ * Online/Offline for the whole app, from one shared flag (also flipped by every request — see fetchWithTimeout).
+ * Reacts at once to the computer's own connection events, and otherwise probes the server every 5s, so a dropped
+ * connection shows within seconds rather than after a hung request gives up.
+ */
 function useConnectivity() {
-  const [online, setOnline] = useState(true);
+  const online = useTillStore((s) => s.online);
   useEffect(() => {
-    let cancelled = false;
-    const check = () => canReachApi().then((ok) => !cancelled && setOnline(ok));
-    check();
-    const interval = setInterval(check, 15000);
+    const probe = () => {
+      canReachApi().catch(() => {});
+    };
+    const goOffline = () => useTillStore.getState().setOnline(false);
+    probe();
+    const interval = setInterval(probe, 5_000);
+    window.addEventListener("offline", goOffline);
+    window.addEventListener("online", probe);
+    window.addEventListener("focus", probe);
     return () => {
-      cancelled = true;
       clearInterval(interval);
+      window.removeEventListener("offline", goOffline);
+      window.removeEventListener("online", probe);
+      window.removeEventListener("focus", probe);
     };
   }, []);
   return online;

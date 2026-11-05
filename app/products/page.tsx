@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Loader2, Plus, Search, Pencil, Trash2, EyeOff } from "lucide-react";
+import { Loader2, Plus, Search, Pencil, Trash2, EyeOff, X } from "lucide-react";
 import clsx from "clsx";
 import { usePosAuthStore } from "@/lib/authStore";
 import { listAdminProducts, deleteProduct } from "@/lib/api/products";
@@ -107,9 +107,21 @@ export default function ProductsPage() {
               <input
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
+                onKeyDown={(e) => e.key === "Escape" && setSearch("")}
                 placeholder="Search a product by name or category…"
-                className="w-full bg-gray-100 border border-gray-200 rounded-xl pl-9 pr-3 py-2 text-sm outline-none focus:border-brand-400 focus:bg-white"
+                className="w-full bg-gray-100 border border-gray-200 rounded-xl pl-9 pr-9 py-2 text-sm outline-none focus:border-brand-400 focus:bg-white"
               />
+              {search && (
+                <button
+                  type="button"
+                  onClick={() => setSearch("")}
+                  title="Clear the search and show every product"
+                  aria-label="Clear the search and show every product"
+                  className="absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded-lg text-gray-400 hover:bg-gray-200 hover:text-gray-700"
+                >
+                  <X size={14} />
+                </button>
+              )}
             </div>
             <p className="text-xs text-gray-400">
               {filtered.length} product{filtered.length !== 1 ? "s" : ""}

@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { API_BASE_URL } from "./apiClient";
+import { API_BASE_URL, fetchWithTimeout } from "./apiClient";
 import { desktop, isDesktop } from "./desktop";
 import { useTillStore } from "./tillStore";
 import { PosPaymentMethod, PosSale, Product } from "./types";
@@ -51,6 +51,9 @@ interface OfflineSalesState {
   sales: QueuedSale[];
   syncing: boolean;
   lastSyncError: string | null;
+  /** When the last upload finished and how many sales it put on the server — drives the brief "synced" confirmation. */
+  lastSyncAt: number | null;
+  lastSyncedCount: number;
   /** Bumped whenever an upload moved sales onto the server, so screens can reload their server data. */
   syncedVersion: number;
   load: () => Promise<void>;
@@ -87,6 +90,8 @@ export const useOfflineSalesStore = create<OfflineSalesState>()((set, get) => ({
   sales: [],
   syncing: false,
   lastSyncError: null,
+  lastSyncAt: null,
+  lastSyncedCount: 0,
   syncedVersion: 0,
 
   load: async () => {
@@ -131,12 +136,13 @@ export const useOfflineSalesStore = create<OfflineSalesState>()((set, get) => ({
     if (!isDesktop() || !device || get().syncing) return;
     // Claimed before any await, so two calls in quick succession can't both upload the same sales.
     set({ syncing: true, lastSyncError: null });
+    let recorded = 0;
     try {
       await get().load();
       const pending = get().sales.filter((s) => s.status === "PENDING");
       for (let i = 0; i < pending.length; i += BATCH_SIZE) {
         const batch = pending.slice(i, i + BATCH_SIZE);
-        const res = await fetch(`${API_BASE_URL}/api/pos/device/sales/batch`, {
+        const res = await fetchWithTimeout(`${API_BASE_URL}/api/pos/device/sales/batch`, {
           method: "POST",
           headers: { "Content-Type": "application/json", "X-Device-Token": device.deviceToken },
           body: JSON.stringify({
@@ -153,10 +159,16 @@ export const useOfflineSalesStore = create<OfflineSalesState>()((set, get) => ({
               soldAt: s.soldAt,
             })),
           }),
-        });
+        }, 30_000);
         if (!res.ok) {
           // A whole-batch failure (server error, revoked till) — nothing was decided, everything stays queued.
-          set({ lastSyncError: `The server answered ${res.status}; the sales stay saved on this till.` });
+          const body = await res.json().catch(() => null);
+          set({
+            lastSyncError:
+              res.status === 401
+                ? "This till is no longer linked to the shop (it was removed in the admin panel). The sales stay saved here; ask an admin to set the till up again."
+                : `The server refused the upload (${res.status}${body?.message ? `: ${body.message}` : ""}). The sales stay saved on this till and will be sent again.`,
+          });
           return;
         }
         const results = (await res.json()) as DeviceSaleResult[];
@@ -172,6 +184,7 @@ export const useOfflineSalesStore = create<OfflineSalesState>()((set, get) => ({
             return { ...s, status: "PENDING" as const, error: r.error ?? "The server had a temporary problem." };
           });
         const movedToServer = results.some((r) => onServer(r));
+        recorded += results.filter((r) => onServer(r)).length;
         set((state) => ({ sales, syncedVersion: movedToServer ? state.syncedVersion + 1 : state.syncedVersion }));
         if (results.some((r) => !onServer(r) && r.status !== "REJECTED")) {
           set({ lastSyncError: "Some sales couldn't be recorded yet because of a server problem; they'll be retried." });
@@ -180,9 +193,13 @@ export const useOfflineSalesStore = create<OfflineSalesState>()((set, get) => ({
         await persist(sales).catch(() => {});
       }
     } catch {
-      // Still offline — try again on the next round.
+      set({
+        lastSyncError: useTillStore.getState().online
+          ? "The server didn't answer in time. The sales stay saved on this till and will be sent again automatically."
+          : "This till is offline. The sales are safe on this computer and will upload as soon as the connection is back.",
+      });
     } finally {
-      set({ syncing: false });
+      set({ syncing: false, lastSyncAt: Date.now(), lastSyncedCount: recorded });
     }
   },
 }));
