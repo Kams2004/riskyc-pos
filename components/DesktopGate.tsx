@@ -123,8 +123,13 @@ function EnrollScreen({ notice, onEnrolled }: { notice: string; onEnrolled: (dev
   };
 
   return (
-    <div className="min-h-screen bg-gray-900 flex items-center justify-center p-6">
-      <form onSubmit={submit} className="w-full max-w-md bg-white rounded-3xl shadow-2xl p-8 space-y-5">
+    <div className="min-h-screen relative flex items-center justify-center p-6 overflow-hidden bg-gray-950">
+      {/* Same shop-counter photo and overlays as the sign-in screen. */}
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img src="/login-background.png" alt="" className="absolute inset-0 w-full h-full object-cover" />
+      <div className="absolute inset-0 bg-gradient-to-t from-gray-950 via-gray-950/70 to-gray-950/30" />
+      <div className="absolute inset-0 bg-brand-900/10" />
+      <form onSubmit={submit} className="relative w-full max-w-md bg-white rounded-3xl shadow-2xl p-8 space-y-5">
         <div className="flex items-center gap-3">
           <div className="w-12 h-12 rounded-2xl bg-brand-500 text-white flex items-center justify-center">
             <MonitorSmartphone size={22} />
