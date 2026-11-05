@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import clsx from "clsx";
-import { CloudUpload, Loader2, RefreshCw, Trash2, AlertTriangle } from "lucide-react";
+import { CloudUpload, Loader2, RefreshCw, Trash2, AlertTriangle, RotateCcw } from "lucide-react";
 import { isDesktop } from "@/lib/desktop";
 import { useOfflineSalesStore } from "@/lib/offlineSales";
 
@@ -22,6 +22,8 @@ export default function OfflineSalesBadge() {
   const lastSyncError = useOfflineSalesStore((s) => s.lastSyncError);
   const syncNow = useOfflineSalesStore((s) => s.syncNow);
   const discard = useOfflineSalesStore((s) => s.discard);
+  const retry = useOfflineSalesStore((s) => s.retry);
+  const [actionError, setActionError] = useState("");
   const [open, setOpen] = useState(false);
 
   if (!isDesktop() || sales.length === 0) return null;
@@ -65,6 +67,7 @@ export default function OfflineSalesBadge() {
             </button>
           </div>
           {lastSyncError && <p className="px-4 pt-3 text-[11px] text-red-600">{lastSyncError}</p>}
+          {actionError && <p className="px-4 pt-3 text-[11px] text-red-600">{actionError}</p>}
           <ul className="max-h-80 overflow-y-auto divide-y divide-gray-50">
             {sales.map((s) => (
               <li key={s.clientSaleId} className="px-4 py-3 flex items-start gap-3">
@@ -75,17 +78,35 @@ export default function OfflineSalesBadge() {
                     {s.cashierName} · {PAYMENT_LABELS[s.paymentMethod]} · {s.items.reduce((n, i) => n + i.quantity, 0)} items
                   </p>
                   {s.status === "REJECTED" && <p className="text-[11px] text-red-600 mt-1">Not accepted: {s.error}</p>}
+                  {s.status === "PENDING" && s.error && (
+                    <p className="text-[11px] text-amber-700 mt-1">Last try didn&apos;t go through ({s.error}) — retrying automatically.</p>
+                  )}
                 </div>
                 {s.status === "REJECTED" ? (
-                  <button
-                    onClick={() => {
-                      if (window.confirm("Discard this sale from the till? It was never recorded on the server.")) discard(s.clientSaleId);
-                    }}
-                    title="Discard"
-                    className="p-1.5 rounded-lg text-gray-400 hover:bg-red-50 hover:text-red-500"
-                  >
-                    <Trash2 size={14} />
-                  </button>
+                  <div className="flex items-center gap-1">
+                    <button
+                      onClick={() => {
+                        setActionError("");
+                        retry(s.clientSaleId).catch(() => setActionError("Couldn't update the sale on this till. Try again."));
+                      }}
+                      disabled={syncing}
+                      title="Try uploading it again"
+                      className="flex items-center gap-1 text-[11px] font-semibold px-2 py-1.5 rounded-lg text-gray-600 hover:bg-gray-100 disabled:opacity-40"
+                    >
+                      <RotateCcw size={12} /> Retry
+                    </button>
+                    <button
+                      onClick={() => {
+                        if (!window.confirm("Discard this sale from the till? It was never recorded on the server.")) return;
+                        setActionError("");
+                        discard(s.clientSaleId).catch(() => setActionError("Couldn't remove the sale from this till. Try again."));
+                      }}
+                      title="Discard"
+                      className="p-1.5 rounded-lg text-gray-400 hover:bg-red-50 hover:text-red-500"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
                 ) : (
                   <span className="text-[10px] font-bold uppercase tracking-wide text-amber-600 bg-amber-50 px-2 py-1 rounded-full whitespace-nowrap">
                     Waiting

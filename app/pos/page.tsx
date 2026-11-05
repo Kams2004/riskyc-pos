@@ -32,7 +32,7 @@ import { usePagination } from "@/lib/usePagination";
 import { usePosCartStore } from "@/lib/cartStore";
 import { isDesktop } from "@/lib/desktop";
 import { useTillStore } from "@/lib/tillStore";
-import { QueuedSale, pendingSales, queuedSaleAsPosSale, useOfflineSalesStore, withPendingStockTaken } from "@/lib/offlineSales";
+import { OfflineSaveError, QueuedSale, pendingSales, saleRefOf, queuedSaleAsPosSale, useOfflineSalesStore, withPendingStockTaken } from "@/lib/offlineSales";
 import { usePhotoSrc } from "@/lib/photoCache";
 
 const PAYMENT_METHODS: {
@@ -374,7 +374,9 @@ function CheckoutBar({
       await onCharge(method);
     } catch (e) {
       setChargeError(
-        e instanceof ApiError && e.status === 403
+        e instanceof OfflineSaveError
+          ? e.message
+          : e instanceof ApiError && e.status === 403
           ? "Your account isn't allowed to record sales. Ask an admin to check your role."
           : e instanceof ApiError
             ? `The sale wasn't recorded: ${e.message}`
@@ -510,7 +512,9 @@ export default function PosScreen() {
       .then(([cat, settingsResp, sales, onlineSales]) => {
         setCatalog(cat);
         // A basket kept from earlier picks up any price/stock change made since it was filled.
-        refreshCartProducts(cat.products);
+        // …with stock already sold by sales still waiting on this till taken off, like the catalog shown.
+        const serverIds = new Set(sales.map((s) => s.clientSaleId));
+        refreshCartProducts(withPendingStockTaken(cat.products, pendingSales(useOfflineSalesStore.getState().sales, serverIds)));
         setSettings(settingsResp);
         const today = new Date().toDateString();
         const todaySales = sales.filter((s) => !s.voided && new Date(s.soldAt).toDateString() === today);
@@ -687,7 +691,8 @@ export default function PosScreen() {
 
   const printSale = (sale: PosSale, saleDiscount = 0) => {
     setPrintData({
-      saleRef: sale.id.slice(0, 8).toUpperCase(),
+      // The ref comes from the till's own sale id, so a ticket printed offline and the synced sale in Sales History match.
+      saleRef: saleRefOf(sale),
       cashierName: sale.cashierName,
       items: sale.items.map((i) => ({
         productName: i.productName,

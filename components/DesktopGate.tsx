@@ -7,7 +7,7 @@ import { desktop, isDesktop, TillDevice } from "@/lib/desktop";
 import { useTillStore } from "@/lib/tillStore";
 import { usePosAuthStore } from "@/lib/authStore";
 import { useOfflineSalesStore } from "@/lib/offlineSales";
-import { syncPhotoCache } from "@/lib/photoCache";
+import { loadSavedPhotos, syncPhotoCache } from "@/lib/photoCache";
 import { PosCatalog } from "@/lib/types";
 
 const HEARTBEAT_MS = 15_000;
@@ -76,12 +76,15 @@ function useTillSync(device: TillDevice | null, onRevoked: () => void) {
       }
     };
 
-    // Read the app's version first so even the first check-in reports it to the Tills card; load the queue of
-    // unsynced sales first too, so the first check-in can already upload it.
-    Promise.all([desktop.appVersion().catch(() => undefined), useOfflineSalesStore.getState().load()])
-      .then(([v]) => v)
-      .catch(() => undefined)
-      .then((v) => {
+    // Photos already saved on the till go on screen straight away — no network needed.
+    loadSavedPhotos().catch(() => {});
+    // Read the app's version first so even the first check-in reports it to the Tills card, and load the queue of
+    // unsynced sales so the first check-in can already upload it. Each failing on its own doesn't affect the other.
+    Promise.all([
+      desktop.appVersion().catch(() => undefined),
+      useOfflineSalesStore.getState().load().catch(() => {}),
+    ])
+      .then(([v]) => {
         appVersion = v;
         return heartbeat();
       })

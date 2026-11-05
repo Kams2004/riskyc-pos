@@ -51,20 +51,45 @@ async function shrink(blob: Blob): Promise<string> {
   return canvas.toDataURL("image/jpeg", 0.8);
 }
 
+const DOWNLOAD_PARALLELISM = 3;
+/** Photos that failed to download this session — not retried on every catalog sync (cleared when the app restarts). */
+const failedThisSession = new Set<string>();
+let savedLoaded: Promise<void> | null = null;
 let running: Promise<void> | null = null;
 
 /**
- * Loads already-saved photos into memory, downloads the missing ones, and forgets photos no longer in the catalog.
- * Safe to call after every catalog sync: only new photos are downloaded, and concurrent calls share one run.
+ * Puts every photo already saved on the till into memory. Needs no network, so an offline start still shows photos.
+ * Runs once per app start; later calls wait for the same run.
+ */
+export function loadSavedPhotos(): Promise<void> {
+  if (!isDesktop()) return Promise.resolve();
+  if (!savedLoaded) {
+    savedLoaded = (async () => {
+      const saved = (await desktop.cacheGet<string[]>(INDEX_KEY).catch(() => null)) ?? [];
+      const store = usePhotoCache.getState();
+      await Promise.all(
+        saved.map(async (id) => {
+          const dataUrl = await desktop.photoGet(id).catch(() => null);
+          if (dataUrl) store.set(id, dataUrl);
+        })
+      );
+    })();
+  }
+  return savedLoaded;
+}
+
+/**
+ * After a catalog sync: downloads photos the till doesn't have yet (a few at a time) and forgets photos no longer in
+ * the catalog. Only new photos are downloaded; concurrent calls share one run.
  */
 export function syncPhotoCache(products: Product[]): Promise<void> {
   if (!isDesktop()) return Promise.resolve();
   if (running) return running;
   running = (async () => {
+    await loadSavedPhotos();
     const wanted = wantedMediaIds(products);
     const wantedSet = new Set(wanted);
     const saved = (await desktop.cacheGet<string[]>(INDEX_KEY).catch(() => null)) ?? [];
-    const savedSet = new Set(saved);
     const store = usePhotoCache.getState();
 
     // Forget photos of products/photos that are gone.
@@ -72,28 +97,27 @@ export function syncPhotoCache(products: Product[]): Promise<void> {
     for (const id of stale) await desktop.photoDelete(id).catch(() => {});
     if (stale.length) store.drop(stale);
 
-    const kept: string[] = saved.filter((id) => wantedSet.has(id));
-    for (const id of wanted) {
-      if (usePhotoCache.getState().photos[id]) continue;
-      if (savedSet.has(id)) {
-        const dataUrl = await desktop.photoGet(id).catch(() => null);
-        if (dataUrl) {
+    const kept = new Set(saved.filter((id) => wantedSet.has(id) && usePhotoCache.getState().photos[id]));
+    const missing = wanted.filter((id) => !usePhotoCache.getState().photos[id] && !failedThisSession.has(id));
+    let next = 0;
+    const worker = async () => {
+      while (next < missing.length) {
+        const id = missing[next++];
+        try {
+          const res = await fetch(`${API_BASE_URL}/api/media/${id}/content`);
+          if (!res.ok) throw new Error(String(res.status));
+          const dataUrl = await shrink(await res.blob());
+          await desktop.photoSet(id, dataUrl);
           store.set(id, dataUrl);
-          continue;
+          kept.add(id);
+        } catch {
+          // Offline, gone, or not an image the webview can decode — the live link is used meanwhile.
+          failedThisSession.add(id);
         }
       }
-      try {
-        const res = await fetch(`${API_BASE_URL}/api/media/${id}/content`);
-        if (!res.ok) continue;
-        const dataUrl = await shrink(await res.blob());
-        await desktop.photoSet(id, dataUrl);
-        store.set(id, dataUrl);
-        if (!kept.includes(id)) kept.push(id);
-      } catch {
-        // Offline or not an image the webview can decode — the live link is used meanwhile.
-      }
-    }
-    await desktop.cacheSet(INDEX_KEY, kept).catch(() => {});
+    };
+    await Promise.all(Array.from({ length: Math.min(DOWNLOAD_PARALLELISM, missing.length) }, worker));
+    await desktop.cacheSet(INDEX_KEY, Array.from(kept)).catch(() => {});
   })().finally(() => {
     running = null;
   });

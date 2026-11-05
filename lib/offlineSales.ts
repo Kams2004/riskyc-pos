@@ -30,14 +30,18 @@ export interface QueuedSale {
   soldAt: string;
   total: number;
   discount: number;
-  /** PENDING = waiting to upload; REJECTED = the server refused it as sent (the reason is in `error`). */
+  /**
+   * PENDING = waiting to upload (retried automatically; `error` then says why the last try didn't go through).
+   * REJECTED = the server refused it as sent — kept aside with the reason in `error` until retried or discarded.
+   */
   status: "PENDING" | "REJECTED";
   error?: string;
 }
 
 interface DeviceSaleResult {
   clientSaleId: string;
-  status: "RECORDED" | "DUPLICATE" | "REJECTED";
+  /** RECORDED/DUPLICATE: the server has it. REJECTED: refused as sent. ERROR (or anything unknown): try again later. */
+  status: string;
   saleId: string | null;
   error: string | null;
 }
@@ -52,16 +56,30 @@ interface OfflineSalesState {
   load: () => Promise<void>;
   enqueue: (sale: QueuedSale) => Promise<void>;
   discard: (clientSaleId: string) => Promise<void>;
+  /** Puts a refused sale back in the queue and uploads it again (e.g. after an admin fixed the cashier's shop). */
+  retry: (clientSaleId: string) => Promise<void>;
   syncNow: () => Promise<void>;
 }
 
 const BATCH_SIZE = 200; // the server's DeviceSaleBatchRequest limit
 
 let writeChain: Promise<unknown> = Promise.resolve();
-/** Writes are chained so two quick changes can never land in the store out of order. */
-function persist(sales: QueuedSale[]) {
-  writeChain = writeChain.then(() => desktop.salesQueueSet(sales)).catch(() => {});
-  return writeChain;
+/**
+ * Writes are chained so two quick changes can never land in the store out of order. The returned promise rejects if
+ * this write failed (the chain itself carries on), so a caller can tell a sale was NOT saved.
+ */
+function persist(sales: QueuedSale[]): Promise<void> {
+  const write = writeChain.then(() => desktop.salesQueueSet(sales));
+  writeChain = write.catch(() => {});
+  return write;
+}
+
+/** The till's own database couldn't take the sale — the cashier must know it isn't recorded anywhere. */
+export class OfflineSaveError extends Error {
+  constructor() {
+    super("The sale couldn't be saved on this till, so it is NOT recorded. Keep the basket and try again, or write the sale down.");
+    this.name = "OfflineSaveError";
+  }
 }
 
 export const useOfflineSalesStore = create<OfflineSalesState>()((set, get) => ({
@@ -82,28 +100,40 @@ export const useOfflineSalesStore = create<OfflineSalesState>()((set, get) => ({
   },
 
   enqueue: async (sale) => {
-    await get().load();
-    const sales = [...get().sales, sale];
-    set({ sales });
-    await persist(sales);
+    try {
+      await get().load();
+      const sales = [...get().sales, sale];
+      await persist(sales);
+      // Shown (and counted) only once it's really on disk.
+      set({ sales: [...get().sales.filter((s) => s.clientSaleId !== sale.clientSaleId), sale] });
+    } catch {
+      throw new OfflineSaveError();
+    }
   },
 
   discard: async (clientSaleId) => {
     await get().load();
     const sales = get().sales.filter((s) => s.clientSaleId !== clientSaleId);
-    set({ sales });
     await persist(sales);
+    set({ sales });
+  },
+
+  retry: async (clientSaleId) => {
+    await get().load();
+    const sales = get().sales.map((s) => (s.clientSaleId === clientSaleId ? { ...s, status: "PENDING" as const, error: undefined } : s));
+    await persist(sales);
+    set({ sales });
+    await get().syncNow();
   },
 
   syncNow: async () => {
     const device = useTillStore.getState().device;
     if (!isDesktop() || !device || get().syncing) return;
-    await get().load().catch(() => {});
-    if (!get().loaded) return;
-    const pending = get().sales.filter((s) => s.status === "PENDING");
-    if (pending.length === 0) return;
+    // Claimed before any await, so two calls in quick succession can't both upload the same sales.
     set({ syncing: true, lastSyncError: null });
     try {
+      await get().load();
+      const pending = get().sales.filter((s) => s.status === "PENDING");
       for (let i = 0; i < pending.length; i += BATCH_SIZE) {
         const batch = pending.slice(i, i + BATCH_SIZE);
         const res = await fetch(`${API_BASE_URL}/api/pos/device/sales/batch`, {
@@ -131,18 +161,23 @@ export const useOfflineSalesStore = create<OfflineSalesState>()((set, get) => ({
         }
         const results = (await res.json()) as DeviceSaleResult[];
         const byId = new Map(results.map((r) => [r.clientSaleId, r]));
+        const onServer = (r?: DeviceSaleResult) => r?.status === "RECORDED" || r?.status === "DUPLICATE";
         const sales = get()
-          .sales.filter((s) => {
-            const r = byId.get(s.clientSaleId);
-            return !r || r.status === "REJECTED";
-          })
+          .sales.filter((s) => !onServer(byId.get(s.clientSaleId)))
           .map((s) => {
             const r = byId.get(s.clientSaleId);
-            return r?.status === "REJECTED" ? { ...s, status: "REJECTED" as const, error: r.error ?? "Refused by the server." } : s;
+            if (!r) return s;
+            if (r.status === "REJECTED") return { ...s, status: "REJECTED" as const, error: r.error ?? "Refused by the server." };
+            // ERROR or anything unknown: a temporary problem on the server — stays pending and is retried.
+            return { ...s, status: "PENDING" as const, error: r.error ?? "The server had a temporary problem." };
           });
-        const movedToServer = results.some((r) => r.status !== "REJECTED");
+        const movedToServer = results.some((r) => onServer(r));
         set((state) => ({ sales, syncedVersion: movedToServer ? state.syncedVersion + 1 : state.syncedVersion }));
-        await persist(sales);
+        if (results.some((r) => !onServer(r) && r.status !== "REJECTED")) {
+          set({ lastSyncError: "Some sales couldn't be recorded yet because of a server problem; they'll be retried." });
+        }
+        // If this write fails, the next start re-uploads the same sales; the server answers DUPLICATE for those.
+        await persist(sales).catch(() => {});
       }
     } catch {
       // Still offline — try again on the next round.
@@ -210,4 +245,12 @@ export function withPendingStockTaken(products: Product[], queued: QueuedSale[])
       }),
     };
   });
+}
+
+/**
+ * A till sale's "Sale #" on tickets and in Sales History: the first 8 characters of the id the till gave it
+ * (clientSaleId), which is the same before and after an offline sale syncs. Falls back to the server id.
+ */
+export function saleRefOf(sale: { clientSaleId?: string | null; id?: string }): string {
+  return (sale.clientSaleId || sale.id || "").slice(0, 8).toUpperCase();
 }

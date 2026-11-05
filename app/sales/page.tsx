@@ -22,7 +22,7 @@ import { usePosAuthStore } from "@/lib/authStore";
 import { ApiError } from "@/lib/apiClient";
 import { listSales, listOnlineSales, voidSale, getSettings, getCatalog } from "@/lib/api/pos";
 import { reconstructSaleDiscount } from "@/lib/pricing";
-import { QueuedSale, useOfflineSalesStore } from "@/lib/offlineSales";
+import { QueuedSale, saleRefOf, useOfflineSalesStore } from "@/lib/offlineSales";
 import { OnlineOrder, PosSale, PosSettings, PosPaymentMethod, Product } from "@/lib/types";
 import PrintArea from "@/components/PrintArea";
 import { ReceiptData } from "@/components/Receipt";
@@ -67,6 +67,8 @@ interface SaleRow {
   voided: boolean;
   pos?: PosSale;
   online?: OnlineOrder;
+  /** What the printed ticket shows as "Sale #" — see saleRefOf. */
+  ref: string;
   /** Rung up on this till while offline and not on the server yet. */
   queued?: QueuedSale;
 }
@@ -75,6 +77,7 @@ interface SaleRow {
 function fromQueuedSale(s: QueuedSale): SaleRow {
   return {
     id: s.clientSaleId,
+    ref: saleRefOf(s),
     channel: "STORE",
     soldAt: s.soldAt,
     person: s.cashierName,
@@ -89,6 +92,7 @@ function fromQueuedSale(s: QueuedSale): SaleRow {
 function fromPosSale(s: PosSale): SaleRow {
   return {
     id: s.id,
+    ref: saleRefOf(s),
     channel: "STORE",
     soldAt: s.soldAt,
     person: s.cashierName,
@@ -104,6 +108,7 @@ function fromOnlineOrder(o: OnlineOrder): SaleRow {
   const customer = o.customerInfo ? `${o.customerInfo.firstName} ${o.customerInfo.lastName}`.trim() : "";
   return {
     id: o.id,
+    ref: o.id.slice(0, 8).toUpperCase(),
     channel: "ONLINE",
     soldAt: o.packagingCompletedAt ?? o.createdAt,
     person: customer || "Online customer",
@@ -182,7 +187,11 @@ export default function SalesHistoryPage() {
       ...queuedSales.filter((q) => !onServer.has(q.clientSaleId)).map(fromQueuedSale),
     ];
   }, [sales, onlineSales, queuedSales]);
-  const cashiers = useMemo(() => Array.from(new Set(sales.map((s) => s.cashierName))).sort(), [sales]);
+  // Cashiers from server sales and from sales still waiting on this till (e.g. someone who only sold offline today).
+  const cashiers = useMemo(
+    () => Array.from(new Set([...sales.map((s) => s.cashierName), ...queuedSales.map((q) => q.cashierName)])).sort(),
+    [sales, queuedSales]
+  );
 
   const today = new Date();
   const last30 = new Date();
@@ -221,7 +230,8 @@ export default function SalesHistoryPage() {
         if (fromDate && new Date(s.soldAt) < new Date(fromDate)) return false;
         if (toDate && new Date(s.soldAt) > new Date(`${toDate}T23:59:59`)) return false;
         if (q) {
-          const haystack = [s.id, s.person, ...s.items.map((i) => i.productName)].join(" ").toLowerCase();
+          // Matches the ticket's ref and either id, so an older ticket (printed with the server id) is found too.
+          const haystack = [s.ref, s.id, s.pos?.clientSaleId ?? "", s.person, ...s.items.map((i) => i.productName)].join(" ").toLowerCase();
           if (!haystack.includes(q)) return false;
         }
         return true;
@@ -254,7 +264,7 @@ export default function SalesHistoryPage() {
 
   const printSale = (sale: SaleRow) => {
     setPrintData({
-      saleRef: sale.id.slice(0, 8).toUpperCase(),
+      saleRef: sale.ref,
       cashierName: sale.person,
       items: sale.items.map((i) => ({
         productName: i.productName,
@@ -275,7 +285,7 @@ export default function SalesHistoryPage() {
   const exportCsv = () => {
     const header = ["Sale #", "Channel", "Date", "Cashier / Customer", "Items", "Amount", "Payment", "Status"];
     const csvRows = filtered.map((s) => [
-      s.id.slice(0, 8),
+      s.ref,
       s.channel === "ONLINE" ? "Online" : "In store",
       new Date(s.soldAt).toLocaleString(),
       s.person,
@@ -438,7 +448,7 @@ export default function SalesHistoryPage() {
                           <Fragment key={`${sale.channel}-${sale.id}`}>
                             <tr className="hover:bg-gray-50/60 transition-colors">
                               <td className="px-4 py-3">
-                                <p className="font-mono text-xs font-bold text-gray-700">{sale.id.slice(0, 8)}…</p>
+                                <p className="font-mono text-xs font-bold text-gray-700">{sale.ref}</p>
                                 <span
                                   className={clsx(
                                     "inline-flex mt-1 text-[10px] font-bold px-1.5 py-0.5 rounded-md",

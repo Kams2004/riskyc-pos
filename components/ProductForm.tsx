@@ -50,12 +50,25 @@ const inputClass =
   "w-full border border-gray-200 rounded-xl px-3.5 py-2.5 text-sm outline-none focus:border-brand-400 disabled:bg-gray-50 disabled:text-gray-500";
 const labelClass = "block text-xs font-semibold text-gray-900 mb-1.5";
 
-function stockFromVariants(product?: Product): Record<string, string> {
-  const map: Record<string, string> = {};
-  (product?.variants ?? []).forEach((v) => {
-    map[variantKey(v.colorName, v.size)] = v.untracked ? "" : String(v.quantity);
-  });
-  return map;
+/** One stock box: unlimited (never sells out), or a counted quantity ("" counts as 0). */
+interface StockCell {
+  unlimited: boolean;
+  value: string;
+}
+
+/**
+ * What the server holds for one (color, size), in the form's terms. A size with no stock row yet is unlimited while the
+ * product counts no stock at all, and 0 once it does — the same rule as lib/stock.ts and the backend.
+ */
+function savedCell(product: Product | undefined, key: string): StockCell {
+  const variant = (product?.variants ?? []).find((v) => variantKey(v.colorName, v.size) === key);
+  if (variant) return variant.untracked ? { unlimited: true, value: "" } : { unlimited: false, value: String(variant.quantity) };
+  const counted = (product?.variants ?? []).some((v) => !v.untracked);
+  return { unlimited: !counted, value: "" };
+}
+
+function sameCell(a: StockCell, b: StockCell) {
+  return a.unlimited === b.unlimited && (a.unlimited || Number(a.value || 0) === Number(b.value || 0));
 }
 
 export default function ProductForm({ initial }: { initial?: Product }) {
@@ -89,7 +102,8 @@ export default function ProductForm({ initial }: { initial?: Product }) {
   const [sizeInput, setSizeInput] = useState("");
   const [badge, setBadge] = useState<Badge | "">(initial?.badge ?? "");
   const [hidden, setHidden] = useState(initial?.hidden ?? false);
-  const [stock, setStock] = useState<Record<string, string>>(() => stockFromVariants(initial));
+  // Only boxes the user touched are kept here; every other box shows what the server has (savedCell).
+  const [stockEdits, setStockEdits] = useState<Record<string, StockCell>>({});
   const [existingMedia, setExistingMedia] = useState<MediaItem[]>(initial?.media ?? []);
   const [pendingFiles, setPendingFiles] = useState<PendingFile[]>([]);
   const [error, setError] = useState("");
@@ -118,9 +132,10 @@ export default function ProductForm({ initial }: { initial?: Product }) {
   const category = categories.find((c) => c.slug === categorySlug);
   const colorNames = colors.length > 0 ? colors.map((c) => c.name) : [""];
   const sizeNames = sizes.length > 0 ? sizes : [""];
-  // Once any box has a number, the product's stock is counted and an empty box means 0 (same rule as lib/stock.ts).
-  const stockTracked = Object.values(stock).some((v) => v !== "");
   const stockCells = colorNames.flatMap((c) => sizeNames.map((s) => ({ color: c, size: s, key: variantKey(c, s) })));
+  const cellFor = (key: string): StockCell => stockEdits[key] ?? savedCell(initial, key);
+  const setCell = (key: string, cell: StockCell) => setStockEdits((prev) => ({ ...prev, [key]: cell }));
+  const allUnlimited = stockCells.every(({ key }) => cellFor(key).unlimited);
 
   const addSize = (raw: string) => {
     const value = raw.trim().toUpperCase();
@@ -154,34 +169,25 @@ export default function ProductForm({ initial }: { initial?: Product }) {
     if (new Set(colors.map((c) => c.name.trim().toLowerCase())).size !== colors.length) return "Two colors have the same name.";
     if (bulkPrices.some((t) => t.quantity <= 1 || t.price <= 0)) return "Each bulk price needs a quantity above 1 and a price above 0.";
     if (isNew && canImages && pendingFiles.length === 0) return "Add at least one photo.";
-    if (Object.values(stock).some((v) => v !== "" && (!/^\d+$/.test(v)))) return "Stock quantities must be whole numbers.";
+    if (Object.values(stockEdits).some((c) => !c.unlimited && c.value !== "" && !/^\d+$/.test(c.value))) return "Stock quantities must be whole numbers.";
     return null;
   };
 
   /**
-   * What to send so the server ends up with exactly what the boxes show. `original` is the saved product (absent for a
-   * new one). All boxes empty = unlimited: a product that was counted gets every variant marked untracked again. Any
-   * number = counted: every box that changed is sent, an emptied one as 0, and a variant that was unlimited before is
-   * sent too so it starts being counted (an empty box then really means none left, as the hint says).
+   * Only the boxes whose state differs from what the server has are sent, each as unlimited (untracked) or a count.
+   * Untouched sizes are never re-sent, so an unlimited size can't silently turn into "0 left". For a new product the
+   * server starts with nothing: all-unlimited needs no request, and as soon as one size is counted every size is sent
+   * explicitly (otherwise the server would treat the unsent ones as 0).
    */
   const stockEntries = (original?: Product): productsApi.StockEntry[] => {
-    const before = original ? stockFromVariants(original) : {};
-    const wasUnlimited = new Set((original?.variants ?? []).filter((v) => v.untracked).map((v) => variantKey(v.colorName, v.size)));
-    const wasCounted = (original?.variants ?? []).some((v) => !v.untracked);
-
-    if (!stockTracked) {
-      if (!wasCounted) return [];
-      const all = new Map<string, { colorName: string; size: string }>();
-      (original?.variants ?? []).forEach((v) => all.set(variantKey(v.colorName, v.size), { colorName: v.colorName, size: v.size }));
-      stockCells.forEach(({ color, size, key }) => all.set(key, { colorName: color, size }));
-      return Array.from(all.values()).map((v) => ({ ...v, quantity: 0, untracked: true }));
-    }
-
-    return stockCells
-      .filter(({ key }) =>
-        original ? (stock[key] ?? "") !== (before[key] ?? "") || wasUnlimited.has(key) : (stock[key] ?? "") !== ""
-      )
-      .map(({ color, size, key }) => ({ colorName: color, size, quantity: Number(stock[key] || 0), untracked: false }));
+    const toEntry = ({ color, size, key }: (typeof stockCells)[number]): productsApi.StockEntry => {
+      const cell = cellFor(key);
+      return cell.unlimited
+        ? { colorName: color, size, quantity: 0, untracked: true }
+        : { colorName: color, size, quantity: Number(cell.value || 0), untracked: false };
+    };
+    if (!original) return allUnlimited ? [] : stockCells.map(toEntry);
+    return stockCells.filter(({ key }) => !sameCell(cellFor(key), savedCell(original, key))).map(toEntry);
   };
 
   const handleSave = async () => {
@@ -539,22 +545,22 @@ export default function ProductForm({ initial }: { initial?: Product }) {
             title="Stock"
             granted={canStock}
             hint={
-              stockTracked
-                ? "Stock is counted for this product: an empty box means none in stock (sold out). Every sale, in store or online, takes from these numbers."
-                : "Leave every box empty for unlimited stock, or enter quantities to start counting stock."
+              allUnlimited
+                ? "Every size is unlimited and never sells out. Type a quantity in a box to start counting that size."
+                : "Counted sizes sell out at 0 (an empty box means none left); sizes marked ∞ never sell out. Every sale, in store or online, takes from these numbers."
             }
           >
             <div className="flex items-center justify-between gap-3 bg-gray-50 rounded-xl px-3.5 py-2.5 mb-3">
               <div>
                 <p className="text-sm font-semibold text-gray-900">Unlimited stock</p>
-                <p className="text-[11px] text-gray-500">Never sells out. Type a quantity in any box to start counting stock.</p>
+                <p className="text-[11px] text-gray-500">Every size never sells out. Use ∞ in a box to make just that size unlimited.</p>
               </div>
               <ToggleSwitch
-                checked={!stockTracked}
+                checked={allUnlimited}
                 disabled={!canStock}
                 onChange={(unlimited) =>
-                  // On: empty every box. Off: start every box at 0 so the boxes can be filled in.
-                  setStock(unlimited ? {} : Object.fromEntries(stockCells.map(({ key }) => [key, "0"])))
+                  // On: every size unlimited. Off: every size counted, starting at 0 so the boxes can be filled in.
+                  setStockEdits(Object.fromEntries(stockCells.map(({ key }) => [key, { unlimited, value: unlimited ? "" : "0" }])))
                 }
               />
             </div>
@@ -564,7 +570,7 @@ export default function ProductForm({ initial }: { initial?: Product }) {
                   <tr className="text-[11px] font-bold uppercase tracking-wide text-gray-900">
                     <th className="text-left pb-2 pr-3">{colors.length > 0 ? "Color" : ""}</th>
                     {sizeNames.map((s) => (
-                      <th key={s || "one"} className="pb-2 px-1 text-center min-w-[84px]">
+                      <th key={s || "one"} className="pb-2 px-1 text-center min-w-[116px]">
                         {s || "Quantity"}
                       </th>
                     ))}
@@ -587,13 +593,31 @@ export default function ProductForm({ initial }: { initial?: Product }) {
                         const key = variantKey(c, s);
                         return (
                           <td key={key} className="py-2 px-1">
-                            <input
-                              inputMode="numeric"
-                              value={stock[key] ?? ""}
-                              onChange={(e) => setStock((prev) => ({ ...prev, [key]: e.target.value.replace(/[^\d]/g, "") }))}
-                              placeholder={stockTracked ? "0" : "∞"}
-                              className="w-full border border-gray-200 rounded-lg px-2 py-2 text-sm text-center tabular-nums outline-none focus:border-brand-400 disabled:bg-gray-50"
-                            />
+                            <div className="flex items-center gap-1">
+                              <input
+                                inputMode="numeric"
+                                aria-label={`Stock ${[c, s].filter(Boolean).join(" ") || "quantity"}`}
+                                value={cellFor(key).unlimited ? "" : cellFor(key).value}
+                                // Typing a number makes this size counted.
+                                onChange={(e) => setCell(key, { unlimited: false, value: e.target.value.replace(/[^\d]/g, "") })}
+                                placeholder={cellFor(key).unlimited ? "∞" : "0"}
+                                className="w-full min-w-0 border border-gray-200 rounded-lg px-2 py-2 text-sm text-center tabular-nums outline-none focus:border-brand-400 disabled:bg-gray-50"
+                              />
+                              <button
+                                type="button"
+                                title={cellFor(key).unlimited ? "Unlimited — tap to count this size" : "Make this size unlimited"}
+                                aria-pressed={cellFor(key).unlimited}
+                                onClick={() =>
+                                  setCell(key, cellFor(key).unlimited ? { unlimited: false, value: "0" } : { unlimited: true, value: "" })
+                                }
+                                className={clsx(
+                                  "flex-shrink-0 w-7 h-7 rounded-lg text-sm font-bold",
+                                  cellFor(key).unlimited ? "bg-brand-500 text-white" : "bg-gray-100 text-gray-500 hover:bg-gray-200"
+                                )}
+                              >
+                                ∞
+                              </button>
+                            </div>
                           </td>
                         );
                       })}
