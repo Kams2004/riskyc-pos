@@ -12,12 +12,15 @@ export interface PosSession {
   permissions: string[];
   /** Null for platform staff (the flagship-store till, sees/sells every seller's products) — set for a seller's own scoped till. */
   enterpriseId: string | null;
+  /** The categories a seller's till may create products in — empty for platform staff, who can use any. */
+  enterpriseCategoryIds: string[];
 }
 
 interface AdminLoginResponse {
   token: string;
   user: { id: string; firstName: string; lastName: string; email: string; roleId: string; roleName: string; enterpriseId: string | null };
   permissions: string[];
+  enterpriseCategoryIds?: string[];
 }
 
 interface PosAuthStore {
@@ -26,7 +29,23 @@ interface PosAuthStore {
   hasHydrated: boolean;
   login: (email: string, password: string) => Promise<{ ok: true } | { ok: false; error: string }>;
   logout: () => void;
+  /** Picks up role changes made in the admin panel without logging out — permissions live in the token, so this swaps in a freshly issued one. */
+  refreshSession: () => Promise<void>;
   hasPermission: (permission: string) => boolean;
+}
+
+function toSession(data: AdminLoginResponse): PosSession {
+  return {
+    token: data.token,
+    id: data.user.id,
+    firstName: data.user.firstName,
+    lastName: data.user.lastName,
+    email: data.user.email,
+    roleName: data.user.roleName,
+    permissions: data.permissions,
+    enterpriseId: data.user.enterpriseId ?? null,
+    enterpriseCategoryIds: data.enterpriseCategoryIds ?? [],
+  };
 }
 
 /** Reuses the exact same admin login endpoint as the web/mobile admin panels — a cashier is just an admin user with the Cashier role, no separate POS credential system. */
@@ -45,18 +64,7 @@ export const usePosAuthStore = create<PosAuthStore>()(
           if (!data.permissions.includes("VIEW_POS")) {
             return { ok: false, error: "This account doesn't have point-of-sale access." };
           }
-          set({
-            session: {
-              token: data.token,
-              id: data.user.id,
-              firstName: data.user.firstName,
-              lastName: data.user.lastName,
-              email: data.user.email,
-              roleName: data.user.roleName,
-              permissions: data.permissions,
-              enterpriseId: data.user.enterpriseId ?? null,
-            },
-          });
+          set({ session: toSession(data) });
           return { ok: true };
         } catch (e) {
           const message = e instanceof ApiError ? e.message : "Could not reach the server. Please try again.";
@@ -65,6 +73,28 @@ export const usePosAuthStore = create<PosAuthStore>()(
       },
 
       logout: () => set({ session: null }),
+
+      refreshSession: async () => {
+        const current = get().session;
+        if (!current) return;
+        try {
+          const data = await apiFetch<AdminLoginResponse>("/api/admin-users/me/session", { method: "POST", token: current.token });
+          if (get().session?.token !== current.token) return;
+          if (!data.permissions.includes("VIEW_POS")) {
+            set({ session: null });
+            return;
+          }
+          const samePermissions =
+            data.permissions.length === current.permissions.length && data.permissions.every((p) => current.permissions.includes(p));
+          // Swapping the session re-runs every page's data load, so only do it when the role actually changed.
+          if (!samePermissions || data.user.roleName !== current.roleName || !current.enterpriseCategoryIds) {
+            set({ session: toSession(data) });
+          }
+        } catch (e) {
+          if (e instanceof ApiError && e.status === 403) set({ session: null });
+          // Offline or a transient error: keep the current session, the till must keep working.
+        }
+      },
 
       hasPermission: (permission) => get().session?.permissions.includes(permission) ?? false,
     }),

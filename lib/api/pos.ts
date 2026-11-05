@@ -1,5 +1,5 @@
 import { apiFetch, API_BASE_URL } from "@/lib/apiClient";
-import { PosCatalog, PosPaymentMethod, PosReconciliationLine, PosSale, PosSettings } from "@/lib/types";
+import { OnlineOrder, PosCatalog, PosPaymentMethod, PosReconciliationLine, PosSale, PosSettings } from "@/lib/types";
 
 export function getCatalog(token: string) {
   return apiFetch<PosCatalog>("/api/pos/catalog", { token });
@@ -7,6 +7,16 @@ export function getCatalog(token: string) {
 
 export function listSales(token: string) {
   return apiFetch<PosSale[]>("/api/pos/sales", { token });
+}
+
+/** Online orders that reached PACKAGED — counted as completed sales alongside till sales. */
+export function listOnlineSales(token: string) {
+  return apiFetch<OnlineOrder[]>("/api/pos/online-sales", { token });
+}
+
+/** Every online order for this shop, any status — needs VIEW_ORDERS. */
+export function listOrders(token: string) {
+  return apiFetch<OnlineOrder[]>("/api/orders", { token });
 }
 
 export function listFlaggedSales(token: string) {
@@ -54,4 +64,35 @@ export async function uploadLogo(token: string, file: File): Promise<PosSettings
   });
   if (!res.ok) throw new Error((await res.json().catch(() => ({}))).message || "Couldn't upload logo");
   return res.json();
+}
+
+export function removeLogo(token: string) {
+  return apiFetch<PosSettings>("/api/pos/settings/logo", { method: "DELETE", token });
+}
+
+// ── Tills (desktop app devices) ──
+
+export interface PosDevice {
+  id: string;
+  name: string;
+  platform: string | null;
+  appVersion: string | null;
+  enrolledAt: string;
+  enrolledByName: string | null;
+  lastSeenAt: string | null;
+  online: boolean;
+  pendingSales: number;
+  revokedAt: string | null;
+}
+
+export function listDevices(token: string) {
+  return apiFetch<PosDevice[]>("/api/pos/devices", { token });
+}
+
+export function createEnrollmentCode(token: string) {
+  return apiFetch<{ code: string; expiresAt: string }>("/api/pos/devices/enrollment-codes", { method: "POST", token });
+}
+
+export function revokeDevice(token: string, id: string) {
+  return apiFetch<PosDevice>(`/api/pos/devices/${id}/revoke`, { method: "POST", token });
 }

@@ -11,7 +11,6 @@ import {
   Check,
   Loader2,
   Banknote,
-  Smartphone,
   Printer,
   TrendingUp,
   ChevronLeft,
@@ -19,8 +18,9 @@ import {
 } from "lucide-react";
 import clsx from "clsx";
 import { usePosAuthStore } from "@/lib/authStore";
+import { ApiError } from "@/lib/apiClient";
 import { usePosPreferencesStore } from "@/lib/posPreferencesStore";
-import { getCatalog, createSale, getSettings, listSales } from "@/lib/api/pos";
+import { getCatalog, createSale, getSettings, listSales, listOnlineSales } from "@/lib/api/pos";
 import { allocateGroupedLineTotals } from "@/lib/pricing";
 import { availableQuantity, isProductSoldOut, stockLevel } from "@/lib/stock";
 import { CartLine, PosCatalog, PosPaymentMethod, PosSale, PosSettings, Product } from "@/lib/types";
@@ -31,13 +31,14 @@ import PosShell from "@/components/PosShell";
 const PAYMENT_METHODS: {
   value: PosPaymentMethod;
   label: string;
-  icon: typeof Banknote;
+  /** Brand logo for the mobile-money buttons; cash keeps the banknote icon. */
+  logo?: string;
   enabledKey: "cashEnabled" | "orangeMoneyEnabled" | "mobileMoneyEnabled";
   classes: string;
 }[] = [
-  { value: "CASH", label: "Cash", icon: Banknote, enabledKey: "cashEnabled", classes: "bg-green-500 hover:bg-green-600 text-white" },
-  { value: "ORANGE_MONEY", label: "Orange Money", icon: Smartphone, enabledKey: "orangeMoneyEnabled", classes: "bg-orange-500 hover:bg-orange-600 text-white" },
-  { value: "MOBILE_MONEY", label: "Mobile Money", icon: Smartphone, enabledKey: "mobileMoneyEnabled", classes: "bg-amber-400 hover:bg-amber-500 text-gray-900" },
+  { value: "CASH", label: "Cash", enabledKey: "cashEnabled", classes: "bg-green-500 hover:bg-green-600 text-white" },
+  { value: "ORANGE_MONEY", label: "Orange Money", logo: "/orange-money.png", enabledKey: "orangeMoneyEnabled", classes: "bg-orange-500 hover:bg-orange-600 text-white" },
+  { value: "MOBILE_MONEY", label: "MTN MoMo", logo: "/mtn-momo.png", enabledKey: "mobileMoneyEnabled", classes: "bg-amber-400 hover:bg-amber-500 text-gray-900" },
 ];
 
 function formatPrice(n: number) {
@@ -75,6 +76,14 @@ function computeCartLineTotals(cart: CartLine[]): Map<string, number> {
 }
 
 const STOCK_DOT = { high: "bg-green-500", low: "bg-amber-500", out: "bg-red-500" };
+
+/** "10 for 10,000" style labels for a product's bulk prices, smallest quantity first. */
+function bulkTierLabels(product: Product): string[] {
+  return (product.bulkPrices ?? [])
+    .filter((t) => t.quantity > 1 && t.price > 0)
+    .sort((a, b) => a.quantity - b.quantity)
+    .map((t) => `${t.quantity} for ${Math.round(t.price).toLocaleString("en-US")}`);
+}
 
 // Picks the first in-stock (color, size) combination for a product, so a
 // tapped product can be added straight to the cart with no intermediate
@@ -156,6 +165,12 @@ function CartLineRow({
         <div className="flex-1 min-w-0">
           <p className="text-xs font-semibold text-gray-900 truncate">{product.name}</p>
           <p className="text-xs font-bold text-brand-600">{formatPrice(lineTotal)}</p>
+          {lineTotal < product.price * line.quantity && (
+            <p className="flex items-center gap-1.5 mt-0.5 whitespace-nowrap">
+              <span className="text-[11px] text-gray-400 line-through">{formatPrice(product.price * line.quantity)}</span>
+              <span className="text-[10px] font-bold text-green-700 bg-green-50 px-1.5 py-0.5 rounded">Bulk price</span>
+            </p>
+          )}
         </div>
         <div className="flex items-center gap-1 flex-shrink-0">
           <button onClick={() => onQtyChange(key, line.quantity - 1)} className="w-6 h-6 rounded-md bg-gray-100 flex items-center justify-center text-gray-500">
@@ -268,7 +283,7 @@ function ProductCard({
           </div>
         )}
         {inCartQty > 0 && (
-          <span className="absolute -top-1 -right-1 bg-brand-500 text-white text-[11px] font-bold w-6 h-6 rounded-full flex items-center justify-center shadow-lg border-2 border-white">
+          <span className="absolute top-1.5 right-1.5 z-10 bg-brand-500 text-white text-[11px] font-bold w-6 h-6 rounded-full flex items-center justify-center shadow-lg border-2 border-white">
             {inCartQty}
           </span>
         )}
@@ -305,6 +320,15 @@ function ProductCard({
       <div className="p-2.5">
         <p className="text-xs font-semibold text-gray-900 leading-tight line-clamp-2">{product.name}</p>
         <p className="text-brand-600 font-bold text-sm mt-1">{formatPrice(product.price)}</p>
+        {bulkTierLabels(product).length > 0 && (
+          <div className="flex flex-wrap gap-1 mt-1.5">
+            {bulkTierLabels(product).map((label) => (
+              <span key={label} className="text-[10px] font-bold text-green-700 bg-green-50 border border-green-200 px-1.5 py-0.5 rounded-md">
+                {label}
+              </span>
+            ))}
+          </div>
+        )}
       </div>
     </button>
   );
@@ -322,6 +346,7 @@ function CheckoutBar({
   const confirmBeforeCharge = usePosPreferencesStore((s) => s.confirmBeforeCharge);
   const [charging, setCharging] = useState<PosPaymentMethod | null>(null);
   const [armed, setArmed] = useState<PosPaymentMethod | null>(null);
+  const [chargeError, setChargeError] = useState("");
 
   // With the "confirm before charging" preference on, the first tap arms the
   // button (it switches to "Confirm?") and only a second tap actually charges;
@@ -335,8 +360,17 @@ function CheckoutBar({
     }
     setArmed(null);
     setCharging(method);
+    setChargeError("");
     try {
       await onCharge(method);
+    } catch (e) {
+      setChargeError(
+        e instanceof ApiError && e.status === 403
+          ? "Your account isn't allowed to record sales. Ask an admin to check your role."
+          : e instanceof ApiError
+            ? `The sale wasn't recorded: ${e.message}`
+            : "The sale wasn't recorded — the server can't be reached. Check the connection and try again."
+      );
     } finally {
       setCharging(null);
     }
@@ -345,9 +379,14 @@ function CheckoutBar({
   const methods = settings ? PAYMENT_METHODS.filter((m) => settings[m.enabledKey]) : PAYMENT_METHODS;
 
   return (
+    <>
+    {chargeError && (
+      <div role="alert" className="mb-3 text-xs font-medium text-red-700 bg-red-50 border border-red-200 rounded-xl px-3 py-2.5">
+        {chargeError}
+      </div>
+    )}
     <div className="grid grid-cols-3 gap-2">
       {methods.map((m) => {
-        const Icon = m.icon;
         const isCharging = charging === m.value;
         const isArmed = armed === m.value;
         return (
@@ -360,12 +399,20 @@ function CheckoutBar({
               isArmed ? "bg-gray-900 text-white ring-2 ring-offset-2 ring-gray-900" : m.classes
             )}
           >
-            {isCharging ? <Loader2 size={18} className="animate-spin" /> : <Icon size={18} />}
+            {isCharging ? (
+              <Loader2 size={18} className="animate-spin" />
+            ) : m.logo ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={m.logo} alt="" className="w-8 h-8 rounded-lg object-cover ring-2 ring-white/80 shadow-sm" />
+            ) : (
+              <Banknote size={18} />
+            )}
             {isCharging ? "Charging…" : isArmed ? "Confirm?" : m.label}
           </button>
         );
       })}
     </div>
+    </>
   );
 }
 
@@ -376,7 +423,7 @@ function SuccessToast({ sale, onPrint, onDismiss }: { sale: PosSale; onPrint: ()
   }, [onDismiss]);
 
   return (
-    <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-40 bg-gray-900 text-white rounded-2xl shadow-2xl px-5 py-4 flex items-center gap-4 animate-slide-up">
+    <div className="fixed bottom-4 inset-x-0 mx-auto w-fit z-40 bg-gray-900 text-white rounded-2xl shadow-2xl px-5 py-4 flex items-center gap-4 animate-slide-up">
       <div className="w-9 h-9 rounded-full bg-green-500/20 flex items-center justify-center flex-shrink-0">
         <Check size={18} className="text-green-400" />
       </div>
@@ -411,19 +458,35 @@ export default function PosScreen() {
   const [category, setCategory] = useState<string | null>(null);
   const [cart, setCart] = useState<CartLine[]>([]);
   const [successSale, setSuccessSale] = useState<PosSale | null>(null);
+  const [successDiscount, setSuccessDiscount] = useState(0);
   const [printData, setPrintData] = useState<ReceiptData | null>(null);
 
   useEffect(() => {
     if (!hasHydrated || !session) return;
-    Promise.all([getCatalog(session.token), getSettings(session.token), listSales(session.token)])
-      .then(([cat, settingsResp, sales]) => {
+    Promise.all([
+      getCatalog(session.token),
+      getSettings(session.token),
+      listSales(session.token),
+      listOnlineSales(session.token).catch(() => []),
+    ])
+      .then(([cat, settingsResp, sales, onlineSales]) => {
         setCatalog(cat);
         setSettings(settingsResp);
         const today = new Date().toDateString();
         const todaySales = sales.filter((s) => !s.voided && new Date(s.soldAt).toDateString() === today);
-        setTodayStats({ count: todaySales.length, total: todaySales.reduce((s, x) => s + x.total, 0) });
+        const todayOnline = onlineSales.filter((o) => o.packagingCompletedAt && new Date(o.packagingCompletedAt).toDateString() === today);
+        setTodayStats({
+          count: todaySales.length + todayOnline.length,
+          total: todaySales.reduce((s, x) => s + x.total, 0) + todayOnline.reduce((s, x) => s + x.total, 0),
+        });
       })
-      .catch((e) => setLoadError(e instanceof Error ? e.message : "Couldn't load the till."))
+      .catch((e) =>
+        setLoadError(
+          e instanceof ApiError
+            ? e.message
+            : "Can't reach the server, so the catalog couldn't load. Check the connection, then reload this page."
+        )
+      )
       .finally(() => setLoading(false));
   }, [hasHydrated, session]);
 
@@ -483,6 +546,8 @@ export default function PosScreen() {
 
   const lineTotals = useMemo(() => computeCartLineTotals(cart), [cart]);
   const total = Array.from(lineTotals.values()).reduce((s, v) => s + v, 0);
+  const regularTotal = cart.reduce((s, l) => s + l.product.price * l.quantity, 0);
+  const discount = Math.max(0, Math.round(regularTotal - total));
   const itemCount = cart.reduce((s, l) => s + l.quantity, 0);
 
   const handleCharge = async (method: PosPaymentMethod) => {
@@ -498,14 +563,17 @@ export default function PosScreen() {
       paymentMethod: method,
       soldAt: new Date().toISOString(),
     });
+    // The backend applies the same bulk prices; the reduction is what the regular prices would have cost minus that.
+    const saleDiscount = Math.max(0, Math.round(regularTotal - sale.total));
     setCart([]);
     setSuccessSale(sale);
+    setSuccessDiscount(saleDiscount);
     setTodayStats((prev) => (prev ? { count: prev.count + 1, total: prev.total + sale.total } : prev));
     getCatalog(session.token).then(setCatalog).catch(() => {});
-    if (autoPrintAfterSale) printSale(sale);
+    if (autoPrintAfterSale) printSale(sale, saleDiscount);
   };
 
-  const printSale = (sale: PosSale) => {
+  const printSale = (sale: PosSale, saleDiscount = 0) => {
     setPrintData({
       saleRef: sale.id.slice(0, 8).toUpperCase(),
       cashierName: sale.cashierName,
@@ -519,6 +587,7 @@ export default function PosScreen() {
       total: sale.total,
       paymentMethod: sale.paymentMethod,
       soldAt: sale.soldAt,
+      discount: saleDiscount,
     });
     setTimeout(() => window.print(), 50);
   };
@@ -633,6 +702,18 @@ export default function PosScreen() {
             </div>
 
             <div className="p-5 border-t border-gray-100">
+              {discount > 0 && (
+                <div className="space-y-1 mb-2 text-sm">
+                  <div className="flex items-center justify-between text-gray-500">
+                    <span>Subtotal</span>
+                    <span className="tabular-nums">{formatPrice(regularTotal)}</span>
+                  </div>
+                  <div className="flex items-center justify-between font-semibold text-green-700">
+                    <span>Bulk discount</span>
+                    <span className="tabular-nums">-{formatPrice(discount)}</span>
+                  </div>
+                </div>
+              )}
               <div className="flex items-center justify-between mb-4">
                 <span className="text-sm font-semibold text-gray-500">Total</span>
                 <span className="text-2xl font-bold text-gray-900">{formatPrice(total)}</span>
@@ -646,7 +727,7 @@ export default function PosScreen() {
       {successSale && (
         <SuccessToast
           sale={successSale}
-          onPrint={() => printSale(successSale)}
+          onPrint={() => printSale(successSale, successDiscount)}
           onDismiss={() => setSuccessSale(null)}
         />
       )}

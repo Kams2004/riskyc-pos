@@ -15,12 +15,14 @@ export interface ReceiptData {
   total: number;
   paymentMethod: PosPaymentMethod;
   soldAt: string;
+  /** Bulk-price reduction on this sale, when known (printed right after the sale); 0/absent prints no discount line. */
+  discount?: number;
 }
 
 const PAYMENT_LABELS: Record<PosPaymentMethod, string> = {
   CASH: "Cash",
   ORANGE_MONEY: "Orange Money",
-  MOBILE_MONEY: "Mobile Money",
+  MOBILE_MONEY: "MTN MoMo",
 };
 
 function formatPrice(n: number) {
@@ -46,7 +48,7 @@ export default function Receipt({ settings, data }: { settings: PosSettings; dat
       style={{ width: `${widthMm}mm`, fontSize: small ? "10px" : "11px", padding: small ? "6px" : "10px" }}
     >
       <div className="text-center mb-2">
-        {settings.logoUrl && (
+        {settings.showLogo && settings.logoUrl && (
           // eslint-disable-next-line @next/next/no-img-element
           <img src={settings.logoUrl} alt="" className="mx-auto mb-1.5 max-h-12 object-contain" />
         )}
@@ -83,6 +85,18 @@ export default function Receipt({ settings, data }: { settings: PosSettings; dat
 
       <div className="border-t border-dashed border-black my-1.5" />
 
+      {!!data.discount && data.discount > 0 && (
+        <>
+          <div className="flex justify-between">
+            <span>Subtotal</span>
+            <span className="tabular-nums">{formatPrice(data.total + data.discount)}</span>
+          </div>
+          <div className="flex justify-between">
+            <span>Bulk discount</span>
+            <span className="tabular-nums">-{formatPrice(data.discount)}</span>
+          </div>
+        </>
+      )}
       <div className="flex justify-between font-bold" style={{ fontSize: small ? "12px" : "14px" }}>
         <span>TOTAL</span>
         <span className="tabular-nums">{formatPrice(data.total)}</span>

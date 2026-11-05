@@ -21,8 +21,8 @@ import {
 } from "lucide-react";
 import clsx from "clsx";
 import { usePosAuthStore } from "@/lib/authStore";
-import { listSales, voidSale, getSettings } from "@/lib/api/pos";
-import { PosSale, PosSettings, PosPaymentMethod } from "@/lib/types";
+import { listSales, listOnlineSales, voidSale, getSettings } from "@/lib/api/pos";
+import { OnlineOrder, PosSale, PosSettings, PosPaymentMethod } from "@/lib/types";
 import PrintArea from "@/components/PrintArea";
 import { ReceiptData } from "@/components/Receipt";
 import PosShell from "@/components/PosShell";
@@ -32,7 +32,7 @@ const PAGE_SIZE = 10;
 const PAYMENT_LABELS: Record<PosPaymentMethod, string> = {
   CASH: "Cash",
   ORANGE_MONEY: "Orange Money",
-  MOBILE_MONEY: "Mobile Money",
+  MOBILE_MONEY: "MTN MoMo",
 };
 
 function formatPrice(n: number) {
@@ -52,12 +52,64 @@ function isSameDay(a: Date, b: Date) {
   return a.toDateString() === b.toDateString();
 }
 
+/** A till sale or a completed (PACKAGED) online order, shown side by side in one history. */
+interface SaleRow {
+  id: string;
+  channel: "STORE" | "ONLINE";
+  soldAt: string;
+  /** The cashier for a till sale, the customer for an online order. */
+  person: string;
+  items: { id: string; productName: string; selectedColor: string; selectedSize: string; quantity: number; unitPrice: number }[];
+  total: number;
+  paymentMethod: PosPaymentMethod;
+  voided: boolean;
+  pos?: PosSale;
+  online?: OnlineOrder;
+}
+
+function fromPosSale(s: PosSale): SaleRow {
+  return {
+    id: s.id,
+    channel: "STORE",
+    soldAt: s.soldAt,
+    person: s.cashierName,
+    items: s.items,
+    total: s.total,
+    paymentMethod: s.paymentMethod,
+    voided: s.voided,
+    pos: s,
+  };
+}
+
+function fromOnlineOrder(o: OnlineOrder): SaleRow {
+  const customer = o.customerInfo ? `${o.customerInfo.firstName} ${o.customerInfo.lastName}`.trim() : "";
+  return {
+    id: o.id,
+    channel: "ONLINE",
+    soldAt: o.packagingCompletedAt ?? o.createdAt,
+    person: customer || "Online customer",
+    items: o.items.map((i) => ({
+      id: i.id,
+      productName: i.productName,
+      selectedColor: i.selectedColor ?? "",
+      selectedSize: i.selectedSize ?? "",
+      quantity: i.quantity,
+      unitPrice: i.unitPrice,
+    })),
+    total: o.total,
+    paymentMethod: o.paymentMethod ?? "MOBILE_MONEY",
+    voided: false,
+    online: o,
+  };
+}
+
 export default function SalesHistoryPage() {
   const session = usePosAuthStore((s) => s.session);
   const hasHydrated = usePosAuthStore((s) => s.hasHydrated);
   const canVoid = usePosAuthStore((s) => s.hasPermission("VOID_POS_SALE"));
 
   const [sales, setSales] = useState<PosSale[]>([]);
+  const [onlineSales, setOnlineSales] = useState<OnlineOrder[]>([]);
   const [settings, setSettings] = useState<PosSettings | null>(null);
   const [printData, setPrintData] = useState<ReceiptData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -67,6 +119,7 @@ export default function SalesHistoryPage() {
 
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<"all" | "completed" | "voided">("all");
+  const [channelFilter, setChannelFilter] = useState<"all" | "STORE" | "ONLINE">("all");
   const [paymentFilter, setPaymentFilter] = useState<"all" | PosPaymentMethod>("all");
   const [cashierFilter, setCashierFilter] = useState<string>("all");
   const [fromDate, setFromDate] = useState("");
@@ -75,23 +128,25 @@ export default function SalesHistoryPage() {
 
   useEffect(() => {
     if (!hasHydrated || !session) return;
-    Promise.all([listSales(session.token), getSettings(session.token)])
-      .then(([salesResp, settingsResp]) => {
+    Promise.all([listSales(session.token), listOnlineSales(session.token).catch(() => []), getSettings(session.token)])
+      .then(([salesResp, onlineResp, settingsResp]) => {
         setSales(salesResp);
+        setOnlineSales(onlineResp);
         setSettings(settingsResp);
       })
       .catch((e) => setError(e instanceof Error ? e.message : "Couldn't load sales."))
       .finally(() => setLoading(false));
   }, [hasHydrated, session]);
 
+  const rows = useMemo(() => [...sales.map(fromPosSale), ...onlineSales.map(fromOnlineOrder)], [sales, onlineSales]);
   const cashiers = useMemo(() => Array.from(new Set(sales.map((s) => s.cashierName))).sort(), [sales]);
 
   const today = new Date();
   const last30 = new Date();
   last30.setDate(last30.getDate() - 30);
 
-  const todaySales = sales.filter((s) => !s.voided && isSameDay(new Date(s.soldAt), today));
-  const last30Sales = sales.filter((s) => !s.voided && new Date(s.soldAt) >= last30);
+  const todaySales = rows.filter((s) => !s.voided && isSameDay(new Date(s.soldAt), today));
+  const last30Sales = rows.filter((s) => !s.voided && new Date(s.soldAt) >= last30);
 
   const stats = [
     { label: "Sales today", value: String(todaySales.length), icon: ShoppingBag, color: "text-brand-500 bg-brand-50" },
@@ -103,6 +158,7 @@ export default function SalesHistoryPage() {
   const resetFilters = () => {
     setSearch("");
     setStatusFilter("all");
+    setChannelFilter("all");
     setPaymentFilter("all");
     setCashierFilter("all");
     setFromDate("");
@@ -112,22 +168,23 @@ export default function SalesHistoryPage() {
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    return sales
+    return rows
       .filter((s) => {
         if (statusFilter === "completed" && s.voided) return false;
         if (statusFilter === "voided" && !s.voided) return false;
+        if (channelFilter !== "all" && s.channel !== channelFilter) return false;
         if (paymentFilter !== "all" && s.paymentMethod !== paymentFilter) return false;
-        if (cashierFilter !== "all" && s.cashierName !== cashierFilter) return false;
+        if (cashierFilter !== "all" && (s.channel !== "STORE" || s.person !== cashierFilter)) return false;
         if (fromDate && new Date(s.soldAt) < new Date(fromDate)) return false;
         if (toDate && new Date(s.soldAt) > new Date(`${toDate}T23:59:59`)) return false;
         if (q) {
-          const haystack = [s.id, s.cashierName, ...s.items.map((i) => i.productName)].join(" ").toLowerCase();
+          const haystack = [s.id, s.person, ...s.items.map((i) => i.productName)].join(" ").toLowerCase();
           if (!haystack.includes(q)) return false;
         }
         return true;
       })
       .sort((a, b) => new Date(b.soldAt).getTime() - new Date(a.soldAt).getTime());
-  }, [sales, search, statusFilter, paymentFilter, cashierFilter, fromDate, toDate]);
+  }, [rows, search, statusFilter, channelFilter, paymentFilter, cashierFilter, fromDate, toDate]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const safePage = Math.min(page, totalPages);
@@ -152,10 +209,10 @@ export default function SalesHistoryPage() {
     }
   };
 
-  const printSale = (sale: PosSale) => {
+  const printSale = (sale: SaleRow) => {
     setPrintData({
       saleRef: sale.id.slice(0, 8).toUpperCase(),
-      cashierName: sale.cashierName,
+      cashierName: sale.person,
       items: sale.items.map((i) => ({
         productName: i.productName,
         selectedColor: i.selectedColor,
@@ -171,17 +228,18 @@ export default function SalesHistoryPage() {
   };
 
   const exportCsv = () => {
-    const header = ["Sale #", "Date", "Cashier", "Items", "Amount", "Payment", "Status"];
-    const rows = filtered.map((s) => [
+    const header = ["Sale #", "Channel", "Date", "Cashier / Customer", "Items", "Amount", "Payment", "Status"];
+    const csvRows = filtered.map((s) => [
       s.id.slice(0, 8),
+      s.channel === "ONLINE" ? "Online" : "In store",
       new Date(s.soldAt).toLocaleString(),
-      s.cashierName,
+      s.person,
       String(s.items.reduce((n, i) => n + i.quantity, 0)),
       String(Math.round(s.total)),
       PAYMENT_LABELS[s.paymentMethod],
       s.voided ? "Voided" : "Completed",
     ]);
-    const csv = [header, ...rows].map((r) => r.map((c) => `"${c.replace(/"/g, '""')}"`).join(",")).join("\n");
+    const csv = [header, ...csvRows].map((r) => r.map((c) => `"${c.replace(/"/g, '""')}"`).join(",")).join("\n");
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -201,7 +259,7 @@ export default function SalesHistoryPage() {
             {/* Stats */}
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
               {stats.map((s) => (
-                <div key={s.label} className="bg-white border border-gray-100 rounded-2xl p-4 flex items-center gap-3">
+                <div key={s.label} className="bg-white border border-gray-200 shadow-sm rounded-2xl p-4 flex items-center gap-3">
                   <div className={clsx("w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0", s.color)}>
                     <s.icon size={17} />
                   </div>
@@ -214,7 +272,7 @@ export default function SalesHistoryPage() {
             </div>
 
             {/* Toolbar */}
-            <div className="bg-white border border-gray-100 rounded-2xl p-4 space-y-3">
+            <div className="bg-white border border-gray-200 shadow-sm rounded-2xl p-4 space-y-3">
               <div className="flex flex-wrap items-center gap-2">
                 <div className="relative flex-1 min-w-[220px]">
                   <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
@@ -222,12 +280,12 @@ export default function SalesHistoryPage() {
                     value={search}
                     onChange={(e) => handleFilterChange(setSearch)(e.target.value)}
                     placeholder="Search a sale (sale #, product, cashier…)"
-                    className="w-full bg-gray-50 border border-gray-100 rounded-xl pl-9 pr-3 py-2 text-sm outline-none focus:border-brand-400 focus:bg-white"
+                    className="w-full bg-gray-100 border border-gray-200 rounded-xl pl-9 pr-3 py-2 text-sm outline-none focus:border-brand-400 focus:bg-white"
                   />
                 </div>
                 <button
                   onClick={exportCsv}
-                  className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold text-gray-600 border border-gray-200 hover:bg-gray-50"
+                  className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold text-gray-600 border border-gray-300 hover:bg-gray-100"
                 >
                   <Download size={13} /> Export
                 </button>
@@ -237,26 +295,35 @@ export default function SalesHistoryPage() {
                 <select
                   value={statusFilter}
                   onChange={(e) => handleFilterChange(setStatusFilter)(e.target.value as typeof statusFilter)}
-                  className="text-xs font-medium bg-gray-50 border border-gray-100 rounded-xl px-2.5 py-2 outline-none"
+                  className="text-xs font-medium bg-gray-100 border border-gray-200 rounded-xl px-2.5 py-2 outline-none"
                 >
                   <option value="all">All statuses</option>
                   <option value="completed">Completed</option>
                   <option value="voided">Voided</option>
                 </select>
                 <select
+                  value={channelFilter}
+                  onChange={(e) => handleFilterChange(setChannelFilter)(e.target.value as typeof channelFilter)}
+                  className="text-xs font-medium bg-gray-100 border border-gray-200 rounded-xl px-2.5 py-2 outline-none"
+                >
+                  <option value="all">In store &amp; online</option>
+                  <option value="STORE">In store</option>
+                  <option value="ONLINE">Online</option>
+                </select>
+                <select
                   value={paymentFilter}
                   onChange={(e) => handleFilterChange(setPaymentFilter)(e.target.value as typeof paymentFilter)}
-                  className="text-xs font-medium bg-gray-50 border border-gray-100 rounded-xl px-2.5 py-2 outline-none"
+                  className="text-xs font-medium bg-gray-100 border border-gray-200 rounded-xl px-2.5 py-2 outline-none"
                 >
                   <option value="all">All payments</option>
                   <option value="CASH">Cash</option>
                   <option value="ORANGE_MONEY">Orange Money</option>
-                  <option value="MOBILE_MONEY">Mobile Money</option>
+                  <option value="MOBILE_MONEY">MTN MoMo</option>
                 </select>
                 <select
                   value={cashierFilter}
                   onChange={(e) => handleFilterChange(setCashierFilter)(e.target.value)}
-                  className="text-xs font-medium bg-gray-50 border border-gray-100 rounded-xl px-2.5 py-2 outline-none"
+                  className="text-xs font-medium bg-gray-100 border border-gray-200 rounded-xl px-2.5 py-2 outline-none"
                 >
                   <option value="all">All cashiers</option>
                   {cashiers.map((c) => (
@@ -265,7 +332,7 @@ export default function SalesHistoryPage() {
                     </option>
                   ))}
                 </select>
-                <div className="flex items-center gap-1.5 bg-gray-50 border border-gray-100 rounded-xl px-2.5 py-1.5">
+                <div className="flex items-center gap-1.5 bg-gray-100 border border-gray-200 rounded-xl px-2.5 py-1.5">
                   <input
                     type="date"
                     value={fromDate}
@@ -282,7 +349,7 @@ export default function SalesHistoryPage() {
                 </div>
                 <button
                   onClick={resetFilters}
-                  className="flex items-center gap-1.5 px-2.5 py-2 rounded-xl text-xs font-semibold text-gray-500 hover:bg-gray-50"
+                  className="flex items-center gap-1.5 px-2.5 py-2 rounded-xl text-xs font-semibold text-gray-500 hover:bg-gray-100"
                 >
                   <RotateCcw size={12} /> Reset
                 </button>
@@ -300,13 +367,13 @@ export default function SalesHistoryPage() {
               <p className="text-center text-gray-400 py-16 text-sm">No sales match these filters.</p>
             ) : (
               <>
-                <div className="bg-white border border-gray-100 rounded-2xl overflow-hidden overflow-x-auto">
+                <div className="bg-white border border-gray-200 shadow-sm rounded-2xl overflow-hidden overflow-x-auto">
                   <table className="w-full min-w-[820px] border-collapse text-sm">
                     <thead>
-                      <tr className="border-b border-gray-100 text-[11px] font-semibold uppercase tracking-wide text-gray-400">
+                      <tr className="bg-gray-50 border-b border-gray-200 text-[11px] font-semibold uppercase tracking-wide text-gray-500">
                         <th className="px-4 py-3 text-left">Sale #</th>
                         <th className="px-4 py-3 text-left">Date &amp; Time</th>
-                        <th className="px-4 py-3 text-left">Cashier</th>
+                        <th className="px-4 py-3 text-left">Cashier / Customer</th>
                         <th className="px-4 py-3 text-left">Items</th>
                         <th className="px-4 py-3 text-left">Amount</th>
                         <th className="px-4 py-3 text-left">Payment</th>
@@ -314,14 +381,24 @@ export default function SalesHistoryPage() {
                         <th className="px-4 py-3 text-center">Actions</th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-gray-50">
+                    <tbody className="divide-y divide-gray-200">
                       {paginated.map((sale) => {
                         const totalQty = sale.items.reduce((n, i) => n + i.quantity, 0);
                         const expanded = expandedId === sale.id;
                         return (
-                          <Fragment key={sale.id}>
+                          <Fragment key={`${sale.channel}-${sale.id}`}>
                             <tr className="hover:bg-gray-50/60 transition-colors">
-                              <td className="px-4 py-3 font-mono text-xs font-bold text-gray-700">{sale.id.slice(0, 8)}…</td>
+                              <td className="px-4 py-3">
+                                <p className="font-mono text-xs font-bold text-gray-700">{sale.id.slice(0, 8)}…</p>
+                                <span
+                                  className={clsx(
+                                    "inline-flex mt-1 text-[10px] font-bold px-1.5 py-0.5 rounded-md",
+                                    sale.channel === "ONLINE" ? "bg-blue-50 text-blue-600" : "bg-gray-100 text-gray-500"
+                                  )}
+                                >
+                                  {sale.channel === "ONLINE" ? "Online" : "In store"}
+                                </span>
+                              </td>
                               <td className="px-4 py-3 text-xs text-gray-500">
                                 {new Date(sale.soldAt).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })}
                                 <br />
@@ -330,9 +407,9 @@ export default function SalesHistoryPage() {
                               <td className="px-4 py-3">
                                 <div className="flex items-center gap-2">
                                   <div className="w-6 h-6 rounded-full bg-brand-100 text-brand-600 flex items-center justify-center text-[10px] font-bold flex-shrink-0">
-                                    {initials(sale.cashierName)}
+                                    {initials(sale.person)}
                                   </div>
-                                  <span className="text-xs text-gray-700">{sale.cashierName}</span>
+                                  <span className="text-xs text-gray-700">{sale.person}</span>
                                 </div>
                               </td>
                               <td className="px-4 py-3 text-xs text-gray-500">{totalQty} item{totalQty !== 1 ? "s" : ""}</td>
@@ -348,7 +425,7 @@ export default function SalesHistoryPage() {
                                 ) : (
                                   <span className="text-[11px] font-bold px-2 py-1 rounded-full bg-green-50 text-green-600">Completed</span>
                                 )}
-                                {sale.stockReconciliationFlag && !sale.voided && (
+                                {sale.pos?.stockReconciliationFlag && !sale.voided && (
                                   <span title="This sale pushed stock negative" className="ml-1 inline-flex items-center gap-1 text-[10px] font-bold text-orange-600 bg-orange-50 px-1.5 py-0.5 rounded-full">
                                     <AlertTriangle size={9} />
                                   </span>
@@ -368,9 +445,9 @@ export default function SalesHistoryPage() {
                                       <Printer size={14} />
                                     </button>
                                   )}
-                                  {!sale.voided && canVoid && (
+                                  {sale.pos && !sale.voided && canVoid && (
                                     <button
-                                      onClick={() => handleVoid(sale)}
+                                      onClick={() => handleVoid(sale.pos!)}
                                       disabled={voidingId === sale.id}
                                       title="Void sale"
                                       className="p-1.5 rounded-lg text-gray-400 hover:bg-red-50 hover:text-red-500 disabled:opacity-50"
@@ -396,10 +473,16 @@ export default function SalesHistoryPage() {
                                         <span className="tabular-nums">{formatPrice(item.unitPrice * item.quantity)}</span>
                                       </div>
                                     ))}
-                                    {sale.voided && sale.voidedByName && (
+                                    {sale.pos?.voided && sale.pos.voidedByName && (
                                       <p className="text-[11px] text-gray-400 pt-1">
-                                        Voided by {sale.voidedByName}
-                                        {sale.voidedAt ? ` · ${new Date(sale.voidedAt).toLocaleString()}` : ""}
+                                        Voided by {sale.pos.voidedByName}
+                                        {sale.pos.voidedAt ? ` · ${new Date(sale.pos.voidedAt).toLocaleString()}` : ""}
+                                      </p>
+                                    )}
+                                    {sale.online && (
+                                      <p className="text-[11px] text-gray-400 pt-1">
+                                        Online order · packed{sale.online.packagingCompletedByName ? ` by ${sale.online.packagingCompletedByName}` : ""}
+                                        {sale.online.customerInfo?.phone ? ` · ${sale.online.customerInfo.phone}` : ""}
                                       </p>
                                     )}
                                   </div>

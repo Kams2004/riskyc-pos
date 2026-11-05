@@ -8,10 +8,11 @@ export function findVariant(product: Pick<Product, "variants">, selectedColor: s
   return product.variants.find((v) => v.colorName === (selectedColor || "") && v.size === (selectedSize || ""));
 }
 
-/** Infinity for an untracked migration sentinel or a combo with no variant row yet — same convention as the storefront's lib/stock.ts. */
+/** Same rule as the storefront's lib/stock.ts and the backend's ProductVariantService: a missing combo is unlimited only while the product's stock has never been entered. */
 export function availableQuantity(product: Pick<Product, "variants">, selectedColor: string, selectedSize: string): number {
   const variant = findVariant(product, selectedColor, selectedSize);
-  if (!variant || variant.untracked) return Infinity;
+  if (!variant) return product.variants.some((v) => !v.untracked) ? 0 : Infinity;
+  if (variant.untracked) return Infinity;
   return Math.max(0, variant.quantity);
 }
 
