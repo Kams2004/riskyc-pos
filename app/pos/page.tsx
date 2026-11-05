@@ -29,6 +29,7 @@ import { ReceiptData } from "@/components/Receipt";
 import PosShell from "@/components/PosShell";
 import Pagination from "@/components/Pagination";
 import { usePagination } from "@/lib/usePagination";
+import { usePosCartStore } from "@/lib/cartStore";
 
 const PAYMENT_METHODS: {
   value: PosPaymentMethod;
@@ -458,7 +459,15 @@ export default function PosScreen() {
   const [loadError, setLoadError] = useState("");
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState<string | null>(null);
-  const [cart, setCart] = useState<CartLine[]>([]);
+  // The basket lives in a store, not here, so leaving the Sale screen and coming back keeps it.
+  const cartOwnerId = usePosCartStore((s) => s.ownerId);
+  const cartLines = usePosCartStore((s) => s.lines);
+  const setCartLines = usePosCartStore((s) => s.setLines);
+  const refreshCartProducts = usePosCartStore((s) => s.refreshProducts);
+  const cart = useMemo(() => (session && cartOwnerId === session.id ? cartLines : []), [session, cartOwnerId, cartLines]);
+  const setCart = (update: CartLine[] | ((prev: CartLine[]) => CartLine[])) => {
+    if (session) setCartLines(session.id, update);
+  };
   const [successSale, setSuccessSale] = useState<PosSale | null>(null);
   const [successDiscount, setSuccessDiscount] = useState(0);
   const [printData, setPrintData] = useState<ReceiptData | null>(null);
@@ -474,6 +483,8 @@ export default function PosScreen() {
     ])
       .then(([cat, settingsResp, sales, onlineSales]) => {
         setCatalog(cat);
+        // A basket kept from earlier picks up any price/stock change made since it was filled.
+        refreshCartProducts(cat.products);
         setSettings(settingsResp);
         const today = new Date().toDateString();
         const todaySales = sales.filter((s) => !s.voided && new Date(s.soldAt).toDateString() === today);
@@ -491,7 +502,7 @@ export default function PosScreen() {
         )
       )
       .finally(() => setLoading(false));
-  }, [hasHydrated, session]);
+  }, [hasHydrated, session, refreshCartProducts]);
 
   const products = catalog?.products ?? [];
   const categories = useMemo(() => Array.from(new Set(products.map((p) => p.categorySlug))).sort(), [products]);

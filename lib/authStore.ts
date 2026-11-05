@@ -3,6 +3,7 @@ import { persist } from "zustand/middleware";
 import { apiFetch, ApiError } from "./apiClient";
 import { desktop, isDesktop } from "./desktop";
 import { useTillStore } from "./tillStore";
+import { usePosCartStore } from "./cartStore";
 
 export interface PosSession {
   token: string;
@@ -98,7 +99,11 @@ export const usePosAuthStore = create<PosAuthStore>()(
         }
       },
 
-      logout: () => set({ session: null }),
+      logout: () => {
+        // An unfinished basket belongs to the cashier who built it — it doesn't wait for whoever logs in next.
+        usePosCartStore.getState().clear();
+        set({ session: null });
+      },
 
       refreshSession: async () => {
         const current = get().session;
