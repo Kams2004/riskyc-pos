@@ -6,9 +6,14 @@ import { API_BASE_URL } from "@/lib/apiClient";
 import { desktop, isDesktop, TillDevice } from "@/lib/desktop";
 import { useTillStore } from "@/lib/tillStore";
 import { usePosAuthStore } from "@/lib/authStore";
+import { useOfflineSalesStore } from "@/lib/offlineSales";
+import { syncPhotoCache } from "@/lib/photoCache";
+import { PosCatalog } from "@/lib/types";
 
 const HEARTBEAT_MS = 15_000;
 const CATALOG_SYNC_MS = 60_000;
+/** While sales are waiting, retry the upload this often (on top of every successful check-in). */
+const SALES_SYNC_MS = 30_000;
 
 function deviceFetch(device: TillDevice, path: string, init: RequestInit = {}) {
   return fetch(`${API_BASE_URL}${path}`, {
@@ -17,7 +22,7 @@ function deviceFetch(device: TillDevice, path: string, init: RequestInit = {}) {
   });
 }
 
-/** Keeps the till checked in and its offline copy of the catalog and ticket settings fresh. */
+/** Keeps the till checked in, uploads sales made offline, and keeps its offline copy of the catalog, photos and ticket settings fresh. */
 function useTillSync(device: TillDevice | null, onRevoked: () => void) {
   const setOnline = useTillStore((s) => s.setOnline);
   const setCatalogSynced = useTillStore((s) => s.setCatalogSynced);
@@ -41,6 +46,8 @@ function useTillSync(device: TillDevice | null, onRevoked: () => void) {
           if (settings.ok) await desktop.cacheSet("settings", await settings.json());
           if (!cancelled) setCatalogSynced();
         }
+        const catalog = await desktop.cacheGet<PosCatalog>("catalog");
+        if (catalog && !cancelled) syncPhotoCache(catalog.products).catch(() => {});
       } catch {
         // Offline — the cached copy stays in use.
       }
@@ -50,7 +57,10 @@ function useTillSync(device: TillDevice | null, onRevoked: () => void) {
       try {
         const res = await deviceFetch(device, "/api/pos/device/heartbeat", {
           method: "POST",
-          body: JSON.stringify({ appVersion: appVersion || undefined, pendingSales: 0 }),
+          body: JSON.stringify({
+            appVersion: appVersion || undefined,
+            pendingSales: useOfflineSalesStore.getState().sales.filter((s) => s.status === "PENDING").length,
+          }),
         });
         if (cancelled) return;
         if (res.status === 401) {
@@ -58,14 +68,18 @@ function useTillSync(device: TillDevice | null, onRevoked: () => void) {
           return;
         }
         setOnline(res.ok);
+        // Reachable again: upload anything sold while offline before the catalog is refreshed, so the
+        // refreshed stock already includes those sales.
+        if (res.ok) await useOfflineSalesStore.getState().syncNow();
       } catch {
         if (!cancelled) setOnline(false);
       }
     };
 
-    // Read the app's version first so even the first check-in reports it to the Tills card.
-    desktop
-      .appVersion()
+    // Read the app's version first so even the first check-in reports it to the Tills card; load the queue of
+    // unsynced sales first too, so the first check-in can already upload it.
+    Promise.all([desktop.appVersion().catch(() => undefined), useOfflineSalesStore.getState().load()])
+      .then(([v]) => v)
       .catch(() => undefined)
       .then((v) => {
         appVersion = v;
@@ -74,10 +88,12 @@ function useTillSync(device: TillDevice | null, onRevoked: () => void) {
       .then(syncCatalog);
     const beat = setInterval(heartbeat, HEARTBEAT_MS);
     const sync = setInterval(syncCatalog, CATALOG_SYNC_MS);
+    const salesSync = setInterval(() => useOfflineSalesStore.getState().syncNow(), SALES_SYNC_MS);
     return () => {
       cancelled = true;
       clearInterval(beat);
       clearInterval(sync);
+      clearInterval(salesSync);
     };
   }, [device, onRevoked, setOnline, setCatalogSynced]);
 }

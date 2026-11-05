@@ -19,8 +19,10 @@ import {
 } from "lucide-react";
 import clsx from "clsx";
 import { usePosAuthStore } from "@/lib/authStore";
+import { ApiError } from "@/lib/apiClient";
 import { listSales, listOnlineSales, voidSale, getSettings, getCatalog } from "@/lib/api/pos";
 import { reconstructSaleDiscount } from "@/lib/pricing";
+import { QueuedSale, useOfflineSalesStore } from "@/lib/offlineSales";
 import { OnlineOrder, PosSale, PosSettings, PosPaymentMethod, Product } from "@/lib/types";
 import PrintArea from "@/components/PrintArea";
 import { ReceiptData } from "@/components/Receipt";
@@ -65,6 +67,23 @@ interface SaleRow {
   voided: boolean;
   pos?: PosSale;
   online?: OnlineOrder;
+  /** Rung up on this till while offline and not on the server yet. */
+  queued?: QueuedSale;
+}
+
+/** A sale still waiting on this till. A refused one is listed but, like a voided sale, never counted. */
+function fromQueuedSale(s: QueuedSale): SaleRow {
+  return {
+    id: s.clientSaleId,
+    channel: "STORE",
+    soldAt: s.soldAt,
+    person: s.cashierName,
+    items: s.items.map((it, i) => ({ id: `${s.clientSaleId}-${i}`, ...it })),
+    total: s.total,
+    paymentMethod: s.paymentMethod,
+    voided: s.status === "REJECTED",
+    queued: s,
+  };
 }
 
 function fromPosSale(s: PosSale): SaleRow {
@@ -126,6 +145,8 @@ export default function SalesHistoryPage() {
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
   const [page, setPage] = useState(1);
+  // An upload of offline sales moves them onto the server: reload so they reappear as recorded sales.
+  const syncedVersion = useOfflineSalesStore((s) => s.syncedVersion);
   // Only used to work out a reprinted ticket's bulk discount; the page works without it.
   const [catalogProducts, setCatalogProducts] = useState<Product[]>([]);
 
@@ -133,18 +154,34 @@ export default function SalesHistoryPage() {
     if (!hasHydrated || !session) return;
     Promise.all([listSales(session.token), listOnlineSales(session.token).catch(() => []), getSettings(session.token)])
       .then(([salesResp, onlineResp, settingsResp]) => {
+        setError("");
         setSales(salesResp);
         setOnlineSales(onlineResp);
         setSettings(settingsResp);
       })
-      .catch((e) => setError(e instanceof Error ? e.message : "Couldn't load sales."))
+      .catch((e) =>
+        setError(
+          e instanceof ApiError
+            ? e.message
+            : "Can't reach the server, so only the sales saved on this till are shown. The full history comes back when the connection does."
+        )
+      )
       .finally(() => setLoading(false));
     getCatalog(session.token)
       .then((c) => setCatalogProducts(c.products))
       .catch(() => {});
-  }, [hasHydrated, session]);
+  }, [hasHydrated, session, syncedVersion]);
 
-  const rows = useMemo(() => [...sales.map(fromPosSale), ...onlineSales.map(fromOnlineOrder)], [sales, onlineSales]);
+  const queuedSales = useOfflineSalesStore((s) => s.sales);
+  const rows = useMemo(() => {
+    const onServer = new Set(sales.map((s) => s.clientSaleId));
+    return [
+      ...sales.map(fromPosSale),
+      ...onlineSales.map(fromOnlineOrder),
+      // Once uploaded a sale comes back from the server; skip its queued copy if both are briefly present.
+      ...queuedSales.filter((q) => !onServer.has(q.clientSaleId)).map(fromQueuedSale),
+    ];
+  }, [sales, onlineSales, queuedSales]);
   const cashiers = useMemo(() => Array.from(new Set(sales.map((s) => s.cashierName))).sort(), [sales]);
 
   const today = new Date();
@@ -230,7 +267,7 @@ export default function SalesHistoryPage() {
       paymentMethod: sale.paymentMethod,
       soldAt: sale.soldAt,
       // Same "Bulk discount" line the original ticket had, when it can be worked out reliably.
-      discount: reconstructSaleDiscount(sale.items, sale.total, catalogProducts),
+      discount: sale.queued ? sale.queued.discount : reconstructSaleDiscount(sale.items, sale.total, catalogProducts),
     });
     setTimeout(() => window.print(), 50);
   };
@@ -245,7 +282,7 @@ export default function SalesHistoryPage() {
       String(s.items.reduce((n, i) => n + i.quantity, 0)),
       String(Math.round(s.total)),
       PAYMENT_LABELS[s.paymentMethod],
-      s.voided ? "Voided" : "Completed",
+      s.queued ? (s.queued.status === "REJECTED" ? "Not accepted" : "Pending sync") : s.voided ? "Voided" : "Completed",
     ]);
     const csv = [header, ...csvRows].map((r) => r.map((c) => `"${c.replace(/"/g, '""')}"`).join(",")).join("\n");
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
@@ -364,12 +401,16 @@ export default function SalesHistoryPage() {
               </div>
             </div>
 
+            {!loading && error && rows.length > 0 && (
+              <div className="text-xs font-medium text-amber-800 bg-amber-50 border border-amber-200 rounded-xl px-4 py-2.5">{error}</div>
+            )}
+
             {/* Table */}
             {loading ? (
               <div className="flex items-center justify-center py-16 text-gray-400">
                 <Loader2 size={24} className="animate-spin" />
               </div>
-            ) : error ? (
+            ) : error && rows.length === 0 ? (
               <div className="text-sm text-red-600 bg-red-50 rounded-xl px-4 py-3">{error}</div>
             ) : filtered.length === 0 ? (
               <p className="text-center text-gray-400 py-16 text-sm">No sales match these filters.</p>
@@ -428,7 +469,17 @@ export default function SalesHistoryPage() {
                                 </span>
                               </td>
                               <td className="px-4 py-3">
-                                {sale.voided ? (
+                                {sale.queued ? (
+                                  sale.queued.status === "REJECTED" ? (
+                                    <span title={sale.queued.error} className="text-[11px] font-bold px-2 py-1 rounded-full bg-red-50 text-red-600">
+                                      Not accepted
+                                    </span>
+                                  ) : (
+                                    <span title="Saved on this till while offline — uploads by itself" className="text-[11px] font-bold px-2 py-1 rounded-full bg-amber-50 text-amber-700">
+                                      Pending sync
+                                    </span>
+                                  )
+                                ) : sale.voided ? (
                                   <span className="text-[11px] font-bold px-2 py-1 rounded-full bg-gray-100 text-gray-500">Voided</span>
                                 ) : (
                                   <span className="text-[11px] font-bold px-2 py-1 rounded-full bg-green-50 text-green-600">Completed</span>

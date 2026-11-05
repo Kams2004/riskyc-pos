@@ -38,6 +38,13 @@ export const desktop = {
   resetTill: () => call<void>("reset_till"),
   cacheGet: <T,>(key: string) => getJson<T>(`cache:${key}`),
   cacheSet: (key: string, value: unknown) => setJson(`cache:${key}`, value),
+  /** Sales rung up while the server was unreachable, waiting to be uploaded (see lib/offlineSales.ts). */
+  salesQueueGet: <T,>() => getJson<T>("queue:sales"),
+  salesQueueSet: (value: unknown) => setJson("queue:sales", value),
+  /** Downscaled product photos for offline use, keyed by media id (presigned URLs expire, ids don't). */
+  photoGet: (mediaId: string) => call<string | null>("kv_get", { key: `photo:${mediaId}` }),
+  photoSet: (mediaId: string, dataUrl: string) => call<void>("kv_set", { key: `photo:${mediaId}`, value: dataUrl }),
+  photoDelete: (mediaId: string) => call<void>("kv_delete", { key: `photo:${mediaId}` }),
   rememberCashier: (email: string, password: string, session: unknown) =>
     call<void>("remember_cashier", { email, password, sessionJson: JSON.stringify(session) }),
   offlineLogin: async <T,>(email: string, password: string): Promise<T | null> => {

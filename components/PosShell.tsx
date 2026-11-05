@@ -8,6 +8,7 @@ import clsx from "clsx";
 import { usePosAuthStore } from "@/lib/authStore";
 import { canReachApi } from "@/lib/apiClient";
 import { allowedNavItems, navItemFor } from "@/lib/posNav";
+import OfflineSalesBadge from "@/components/OfflineSalesBadge";
 
 function useSessionRefresh(active: boolean) {
   const refreshSession = usePosAuthStore((s) => s.refreshSession);
@@ -167,6 +168,7 @@ export default function PosShell({
                   Offline sign-in
                 </span>
               ))}
+            <OfflineSalesBadge />
             <span
               className={clsx(
                 "flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1.5 rounded-full",

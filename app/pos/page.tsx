@@ -30,6 +30,10 @@ import PosShell from "@/components/PosShell";
 import Pagination from "@/components/Pagination";
 import { usePagination } from "@/lib/usePagination";
 import { usePosCartStore } from "@/lib/cartStore";
+import { isDesktop } from "@/lib/desktop";
+import { useTillStore } from "@/lib/tillStore";
+import { QueuedSale, pendingSales, queuedSaleAsPosSale, useOfflineSalesStore, withPendingStockTaken } from "@/lib/offlineSales";
+import { usePhotoSrc } from "@/lib/photoCache";
 
 const PAYMENT_METHODS: {
   value: PosPaymentMethod;
@@ -129,6 +133,7 @@ function CartLineRow({
   const product = line.product;
   const key = cartLineKey(line);
   const image = product.media.find((m) => m.type === "IMAGE");
+  const imageSrc = usePhotoSrc(image);
   const needsColor = product.colors.length > 1;
   const needsSize = product.sizes.length > 1;
 
@@ -162,7 +167,7 @@ function CartLineRow({
         <div className="w-12 h-12 rounded-lg overflow-hidden bg-gray-100 flex-shrink-0">
           {image ? (
             // eslint-disable-next-line @next/next/no-img-element
-            <img src={image.presignedUrl} alt="" className="w-full h-full object-cover" />
+            <img src={imageSrc} alt="" className="w-full h-full object-cover" />
           ) : null}
         </div>
         <div className="flex-1 min-w-0">
@@ -256,6 +261,7 @@ function ProductCard({
   const images = product.media.filter((m) => m.type === "IMAGE");
   const [imageIndex, setImageIndex] = useState(0);
   const image = images[imageIndex] ?? images[0];
+  const imageSrc = usePhotoSrc(image);
 
   return (
     <button
@@ -270,7 +276,7 @@ function ProductCard({
       <div className="aspect-square bg-gray-100 relative">
         {image ? (
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={image.presignedUrl} alt={product.name} className="w-full h-full object-cover" />
+          <img src={imageSrc} alt={product.name} className="w-full h-full object-cover" />
         ) : null}
         <span className={clsx("absolute top-2 left-2 w-2.5 h-2.5 rounded-full border-2 border-white shadow", STOCK_DOT[level])} />
         {soldOut && (
@@ -419,7 +425,18 @@ function CheckoutBar({
   );
 }
 
-function SuccessToast({ sale, onPrint, onDismiss }: { sale: PosSale; onPrint: () => void; onDismiss: () => void }) {
+function SuccessToast({
+  sale,
+  offline,
+  onPrint,
+  onDismiss,
+}: {
+  sale: PosSale;
+  /** Saved on this till because the server couldn't be reached — it uploads by itself later. */
+  offline: boolean;
+  onPrint: () => void;
+  onDismiss: () => void;
+}) {
   useEffect(() => {
     const t = setTimeout(onDismiss, 5000);
     return () => clearTimeout(t);
@@ -433,6 +450,7 @@ function SuccessToast({ sale, onPrint, onDismiss }: { sale: PosSale; onPrint: ()
       <div>
         <p className="font-bold">{formatPrice(sale.total)}</p>
         <p className="text-xs text-gray-400">{sale.paymentMethod.replace("_", " ")} · {sale.items.reduce((s, i) => s + i.quantity, 0)} items</p>
+        {offline && <p className="text-xs font-semibold text-amber-300 mt-0.5">Saved offline — will sync</p>}
       </div>
       <button
         onClick={onPrint}
@@ -470,6 +488,14 @@ export default function PosScreen() {
   };
   const [successSale, setSuccessSale] = useState<PosSale | null>(null);
   const [successDiscount, setSuccessDiscount] = useState(0);
+  const [successOffline, setSuccessOffline] = useState(false);
+  /** Sales the server already has (by clientSaleId) — a queued sale that's also here isn't counted twice. */
+  const [serverClientIds, setServerClientIds] = useState<Set<string>>(new Set());
+  const queuedSales = useOfflineSalesStore((s) => s.sales);
+  const enqueueOfflineSale = useOfflineSalesStore((s) => s.enqueue);
+  // Each upload of offline sales reloads the catalog and today's totals from the server.
+  const syncedVersion = useOfflineSalesStore((s) => s.syncedVersion);
+  const waitingSales = useMemo(() => pendingSales(queuedSales, serverClientIds), [queuedSales, serverClientIds]);
   const [printData, setPrintData] = useState<ReceiptData | null>(null);
 
   useEffect(() => {
@@ -489,6 +515,7 @@ export default function PosScreen() {
         const today = new Date().toDateString();
         const todaySales = sales.filter((s) => !s.voided && new Date(s.soldAt).toDateString() === today);
         const todayOnline = onlineSales.filter((o) => o.packagingCompletedAt && new Date(o.packagingCompletedAt).toDateString() === today);
+        setServerClientIds(new Set(sales.map((s) => s.clientSaleId)));
         setTodayStats({
           count: todaySales.length + todayOnline.length,
           total: todaySales.reduce((s, x) => s + x.total, 0) + todayOnline.reduce((s, x) => s + x.total, 0),
@@ -502,9 +529,10 @@ export default function PosScreen() {
         )
       )
       .finally(() => setLoading(false));
-  }, [hasHydrated, session, refreshCartProducts]);
+  }, [hasHydrated, session, refreshCartProducts, syncedVersion]);
 
-  const products = catalog?.products ?? [];
+  // Stock already sold by sales still waiting to sync is taken off, so the till never offers those units again.
+  const products = useMemo(() => withPendingStockTaken(catalog?.products ?? [], waitingSales), [catalog, waitingSales]);
   const categories = useMemo(() => Array.from(new Set(products.map((p) => p.categorySlug))).sort(), [products]);
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -566,28 +594,96 @@ export default function PosScreen() {
   const discount = Math.max(0, Math.round(regularTotal - total));
   const itemCount = cart.reduce((s, l) => s + l.quantity, 0);
 
+  /**
+   * Keeps the sale on this till when the server can't be reached (desktop app only). Same clientSaleId as the attempt
+   * that failed: if that attempt did reach the server after all, the upload is recognised as a duplicate, never
+   * recorded twice. Prices are what the cashier saw; the server re-prices with the same rules when it syncs.
+   */
+  const saveOffline = async (method: PosPaymentMethod, clientSaleId: string, soldAt: string): Promise<QueuedSale> => {
+    const queued: QueuedSale = {
+      clientSaleId,
+      cashierId: session!.id,
+      cashierName: `${session!.firstName} ${session!.lastName}`.trim(),
+      items: cart.map((l) => {
+        const lineTotal = lineTotals.get(cartLineKey(l)) ?? l.product.price * l.quantity;
+        return {
+          productId: l.product.id,
+          productName: l.product.name,
+          thumbnailUrl: l.product.media.find((m) => m.type === "IMAGE")?.presignedUrl ?? null,
+          quantity: l.quantity,
+          selectedColor: l.selectedColor,
+          selectedSize: l.selectedSize,
+          unitPrice: lineTotal / l.quantity,
+        };
+      }),
+      paymentMethod: method,
+      soldAt,
+      total,
+      discount,
+      status: "PENDING",
+    };
+    await enqueueOfflineSale(queued);
+    return queued;
+  };
+
   const handleCharge = async (method: PosPaymentMethod) => {
     if (!session) return;
-    const sale = await createSale(session.token, {
-      clientSaleId: crypto.randomUUID(),
-      items: cart.map((l) => ({
-        productId: l.product.id,
-        quantity: l.quantity,
-        selectedColor: l.selectedColor,
-        selectedSize: l.selectedSize,
-      })),
-      paymentMethod: method,
-      soldAt: new Date().toISOString(),
-    });
-    // The backend applies the same bulk prices; the reduction is what the regular prices would have cost minus that.
-    const saleDiscount = Math.max(0, Math.round(regularTotal - sale.total));
+    const clientSaleId = crypto.randomUUID();
+    const soldAt = new Date().toISOString();
+    const canQueue = isDesktop() && !!useTillStore.getState().device;
+
+    let sale: PosSale;
+    let saleDiscount: number;
+    let offline = false;
+    if (canQueue && session.offline) {
+      // Signed in offline: there's no server token to record with, so the till's own sync uploads it.
+      sale = queuedSaleAsPosSale(await saveOffline(method, clientSaleId, soldAt));
+      saleDiscount = discount;
+      offline = true;
+    } else {
+      try {
+        sale = await createSale(session.token, {
+          clientSaleId,
+          items: cart.map((l) => ({
+            productId: l.product.id,
+            quantity: l.quantity,
+            selectedColor: l.selectedColor,
+            selectedSize: l.selectedSize,
+          })),
+          paymentMethod: method,
+          soldAt,
+        });
+        // The backend applies the same bulk prices; the reduction is what the regular prices would have cost minus that.
+        saleDiscount = Math.max(0, Math.round(regularTotal - sale.total));
+      } catch (e) {
+        // Only "couldn't reach the server" is kept for later (no answer, or a gateway saying the server is down). A
+        // real refusal — no permission, bad data — is shown to the cashier as before.
+        const unreachable = !(e instanceof ApiError) || e.status >= 502;
+        if (!canQueue || !unreachable) throw e;
+        sale = queuedSaleAsPosSale(await saveOffline(method, clientSaleId, soldAt));
+        saleDiscount = discount;
+        offline = true;
+      }
+    }
+
     setCart([]);
     setSuccessSale(sale);
     setSuccessDiscount(saleDiscount);
-    setTodayStats((prev) => (prev ? { count: prev.count + 1, total: prev.total + sale.total } : prev));
-    getCatalog(session.token).then(setCatalog).catch(() => {});
+    setSuccessOffline(offline);
+    if (!offline) {
+      // Offline sales are counted from the queue instead (see todayCount below).
+      setTodayStats((prev) => (prev ? { count: prev.count + 1, total: prev.total + sale.total } : prev));
+      setServerClientIds((prev) => new Set(prev).add(clientSaleId));
+      getCatalog(session.token).then(setCatalog).catch(() => {});
+    }
     if (autoPrintAfterSale) printSale(sale, saleDiscount);
   };
+
+  // Today's totals: what the server has, plus sales made today that are still waiting on this till.
+  const todayKey = new Date().toDateString();
+  const waitingToday = waitingSales.filter((s) => new Date(s.soldAt).toDateString() === todayKey);
+  const todayCount = (todayStats?.count ?? 0) + waitingToday.length;
+  const todayTotal = (todayStats?.total ?? 0) + waitingToday.reduce((sum, s) => sum + s.total, 0);
 
   const printSale = (sale: PosSale, saleDiscount = 0) => {
     setPrintData({
@@ -621,10 +717,10 @@ export default function PosScreen() {
           className="w-full bg-gray-50 border border-gray-100 rounded-xl pl-9 pr-3 py-2 text-sm outline-none focus:border-brand-400 focus:bg-white"
         />
       </div>
-      {todayStats && (
+      {(todayStats || waitingToday.length > 0) && (
         <span className="hidden md:flex items-center gap-1.5 text-xs font-semibold text-gray-500 bg-gray-50 px-3 py-1.5 rounded-full whitespace-nowrap">
           <TrendingUp size={12} className="text-brand-500" />
-          {todayStats.count} sales today · {formatPrice(todayStats.total)}
+          {todayCount} sales today · {formatPrice(todayTotal)}
         </span>
       )}
     </div>
@@ -755,6 +851,7 @@ export default function PosScreen() {
       {successSale && (
         <SuccessToast
           sale={successSale}
+          offline={successOffline}
           onPrint={() => printSale(successSale, successDiscount)}
           onDismiss={() => setSuccessSale(null)}
         />
