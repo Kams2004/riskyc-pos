@@ -63,3 +63,33 @@ export function allocateGroupedLineTotals(
   }
   return lineTotals;
 }
+
+/**
+ * The bulk-price reduction of a past sale, for reprinting its ticket. A sale stores only the effective unit price
+ * per line (line total ÷ quantity), not the regular price, so this re-prices the sale with the product's current
+ * price and tiers — and trusts the result only if that reproduces every stored line total. If a price or tier has
+ * changed since, the reduction can't be known and 0 is returned (no discount line) rather than a made-up figure.
+ */
+export function reconstructSaleDiscount(
+  items: { productId: string | null; quantity: number; unitPrice: number }[],
+  total: number,
+  products: { id: string; price: number; bulkPrices?: BulkPriceTier[] }[]
+): number {
+  const byId = new Map(products.map((p) => [p.id, p]));
+  const groups = new Map<string, { quantity: number; lineTotal: number }[]>();
+  for (const item of items) {
+    if (!item.productId || !byId.has(item.productId)) return 0;
+    const list = groups.get(item.productId) ?? [];
+    list.push({ quantity: item.quantity, lineTotal: item.unitPrice * item.quantity });
+    groups.set(item.productId, list);
+  }
+  let regularTotal = 0;
+  for (const [productId, lines] of groups) {
+    const product = byId.get(productId)!;
+    const repriced = allocateGroupedLineTotals(product.price, product.bulkPrices, lines.map((l) => l.quantity));
+    // Stored unit prices are rounded to 2 decimals, so allow a franc of rounding per line.
+    if (repriced.some((t, i) => Math.abs(t - lines[i].lineTotal) > 1)) return 0;
+    regularTotal += lines.reduce((s, l) => s + product.price * l.quantity, 0);
+  }
+  return Math.max(0, Math.round(regularTotal - total));
+}

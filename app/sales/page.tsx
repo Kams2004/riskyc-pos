@@ -19,8 +19,9 @@ import {
 } from "lucide-react";
 import clsx from "clsx";
 import { usePosAuthStore } from "@/lib/authStore";
-import { listSales, listOnlineSales, voidSale, getSettings } from "@/lib/api/pos";
-import { OnlineOrder, PosSale, PosSettings, PosPaymentMethod } from "@/lib/types";
+import { listSales, listOnlineSales, voidSale, getSettings, getCatalog } from "@/lib/api/pos";
+import { reconstructSaleDiscount } from "@/lib/pricing";
+import { OnlineOrder, PosSale, PosSettings, PosPaymentMethod, Product } from "@/lib/types";
 import PrintArea from "@/components/PrintArea";
 import { ReceiptData } from "@/components/Receipt";
 import PosShell from "@/components/PosShell";
@@ -58,7 +59,7 @@ interface SaleRow {
   soldAt: string;
   /** The cashier for a till sale, the customer for an online order. */
   person: string;
-  items: { id: string; productName: string; selectedColor: string; selectedSize: string; quantity: number; unitPrice: number }[];
+  items: { id: string; productId: string | null; productName: string; selectedColor: string; selectedSize: string; quantity: number; unitPrice: number }[];
   total: number;
   paymentMethod: PosPaymentMethod;
   voided: boolean;
@@ -89,6 +90,7 @@ function fromOnlineOrder(o: OnlineOrder): SaleRow {
     person: customer || "Online customer",
     items: o.items.map((i) => ({
       id: i.id,
+      productId: i.productId,
       productName: i.productName,
       selectedColor: i.selectedColor ?? "",
       selectedSize: i.selectedSize ?? "",
@@ -124,6 +126,8 @@ export default function SalesHistoryPage() {
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
   const [page, setPage] = useState(1);
+  // Only used to work out a reprinted ticket's bulk discount; the page works without it.
+  const [catalogProducts, setCatalogProducts] = useState<Product[]>([]);
 
   useEffect(() => {
     if (!hasHydrated || !session) return;
@@ -135,6 +139,9 @@ export default function SalesHistoryPage() {
       })
       .catch((e) => setError(e instanceof Error ? e.message : "Couldn't load sales."))
       .finally(() => setLoading(false));
+    getCatalog(session.token)
+      .then((c) => setCatalogProducts(c.products))
+      .catch(() => {});
   }, [hasHydrated, session]);
 
   const rows = useMemo(() => [...sales.map(fromPosSale), ...onlineSales.map(fromOnlineOrder)], [sales, onlineSales]);
@@ -222,6 +229,8 @@ export default function SalesHistoryPage() {
       total: sale.total,
       paymentMethod: sale.paymentMethod,
       soldAt: sale.soldAt,
+      // Same "Bulk discount" line the original ticket had, when it can be worked out reliably.
+      discount: reconstructSaleDiscount(sale.items, sale.total, catalogProducts),
     });
     setTimeout(() => window.print(), 50);
   };
