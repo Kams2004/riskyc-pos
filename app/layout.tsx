@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Inter, Playfair_Display } from "next/font/google";
 import "./globals.css";
 import DesktopUpdater from "@/components/DesktopUpdater";
+import DesktopGate from "@/components/DesktopGate";
 
 const inter = Inter({
   subsets: ["latin"],
@@ -22,7 +23,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en">
       <body className={`${inter.variable} ${playfair.variable} font-sans`}>
-        {children}
+        <DesktopGate>{children}</DesktopGate>
         <DesktopUpdater />
       </body>
     </html>

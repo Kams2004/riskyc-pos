@@ -466,7 +466,8 @@ export default function PosScreen() {
     Promise.all([
       getCatalog(session.token),
       getSettings(session.token),
-      listSales(session.token),
+      // Optional for the till to work: offline, the catalog comes from the offline copy and today's totals just start at 0.
+      listSales(session.token).catch(() => []),
       listOnlineSales(session.token).catch(() => []),
     ])
       .then(([cat, settingsResp, sales, onlineSales]) => {

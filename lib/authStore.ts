@@ -1,6 +1,8 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { apiFetch, ApiError } from "./apiClient";
+import { desktop, isDesktop } from "./desktop";
+import { useTillStore } from "./tillStore";
 
 export interface PosSession {
   token: string;
@@ -14,6 +16,8 @@ export interface PosSession {
   enterpriseId: string | null;
   /** The categories a seller's till may create products in — empty for platform staff, who can use any. */
   enterpriseCategoryIds: string[];
+  /** Signed in on the desktop app while the server was unreachable — no server token; works from the till's offline copy. */
+  offline?: boolean;
 }
 
 interface AdminLoginResponse {
@@ -64,9 +68,31 @@ export const usePosAuthStore = create<PosAuthStore>()(
           if (!data.permissions.includes("VIEW_POS")) {
             return { ok: false, error: "This account doesn't have point-of-sale access." };
           }
-          set({ session: toSession(data) });
+          const session = toSession(data);
+          if (isDesktop()) {
+            // A till only sells for the shop it was set up for — another shop's cashier would ring up sales the
+            // server then rejects at sync.
+            const till = useTillStore.getState().device;
+            if (till && session.enterpriseId !== till.enterpriseId) {
+              return { ok: false, error: `This till belongs to ${till.storeName}. Sign in with an account from that shop.` };
+            }
+            const { token: _token, ...offlineCopy } = session;
+            await desktop.rememberCashier(email, password, offlineCopy).catch(() => {});
+          }
+          set({ session });
           return { ok: true };
         } catch (e) {
+          if (!(e instanceof ApiError) && isDesktop()) {
+            const saved = await desktop.offlineLogin<Omit<PosSession, "token">>(email, password).catch(() => null);
+            if (saved) {
+              set({ session: { ...saved, token: "", offline: true } });
+              return { ok: true };
+            }
+            return {
+              ok: false,
+              error: "The server can't be reached. Offline sign-in works for cashiers who signed in on this till in the last 7 days.",
+            };
+          }
           const message = e instanceof ApiError ? e.message : "Could not reach the server. Please try again.";
           return { ok: false, error: message };
         }
@@ -76,7 +102,7 @@ export const usePosAuthStore = create<PosAuthStore>()(
 
       refreshSession: async () => {
         const current = get().session;
-        if (!current) return;
+        if (!current || current.offline) return;
         try {
           const data = await apiFetch<AdminLoginResponse>("/api/admin-users/me/session", { method: "POST", token: current.token });
           if (get().session?.token !== current.token) return;

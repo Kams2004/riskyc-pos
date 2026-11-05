@@ -160,6 +160,26 @@ export default function PosShell({
           <h1 className="font-bold text-gray-900 text-lg flex-shrink-0">{title}</h1>
           {headerExtra && <div className="flex-1 min-w-0">{headerExtra}</div>}
           <div className="ml-auto flex items-center gap-3 flex-shrink-0">
+            {session.offline &&
+              (online ? (
+                // Back online: an online sign-in restores Sales History, Orders and live data.
+                <button
+                  onClick={() => {
+                    logout();
+                    router.replace("/login");
+                  }}
+                  className="hidden md:flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1.5 rounded-full bg-amber-100 text-amber-800 hover:bg-amber-200"
+                >
+                  Back online — sign in again
+                </button>
+              ) : (
+                <span
+                  title="Signed in while the server was unreachable — the till works from its offline copy"
+                  className="hidden md:flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1.5 rounded-full bg-amber-50 text-amber-700"
+                >
+                  Offline sign-in
+                </span>
+              ))}
             <span
               className={clsx(
                 "flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1.5 rounded-full",

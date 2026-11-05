@@ -1,8 +1,28 @@
-import { apiFetch, API_BASE_URL } from "@/lib/apiClient";
+import { apiFetch, ApiError, API_BASE_URL } from "@/lib/apiClient";
+import { desktop, isDesktop } from "@/lib/desktop";
 import { OnlineOrder, PosCatalog, PosPaymentMethod, PosReconciliationLine, PosSale, PosSettings } from "@/lib/types";
 
+/**
+ * Desktop app: every successful load refreshes the till's encrypted offline copy, and when the server can't be
+ * reached (or the cashier signed in offline, with no server token) the offline copy is used instead.
+ */
+async function withOfflineCopy<T>(cacheKey: string, token: string, load: () => Promise<T>): Promise<T> {
+  if (!isDesktop()) return load();
+  try {
+    const fresh = await load();
+    desktop.cacheSet(cacheKey, fresh).catch(() => {});
+    return fresh;
+  } catch (e) {
+    if (!(e instanceof ApiError) || !token) {
+      const cached = await desktop.cacheGet<T>(cacheKey).catch(() => null);
+      if (cached) return cached;
+    }
+    throw e;
+  }
+}
+
 export function getCatalog(token: string) {
-  return apiFetch<PosCatalog>("/api/pos/catalog", { token });
+  return withOfflineCopy("catalog", token, () => apiFetch<PosCatalog>("/api/pos/catalog", { token }));
 }
 
 export function listSales(token: string) {
@@ -47,7 +67,7 @@ export function voidSale(token: string, saleId: string) {
 }
 
 export function getSettings(token: string) {
-  return apiFetch<PosSettings>("/api/pos/settings", { token });
+  return withOfflineCopy("settings", token, () => apiFetch<PosSettings>("/api/pos/settings", { token }));
 }
 
 export function updateSettings(token: string, data: Omit<PosSettings, "logoUrl">) {
