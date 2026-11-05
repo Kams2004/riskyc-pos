@@ -54,7 +54,7 @@ export default function ProductsPage() {
   useEffect(() => {
     if (!hasHydrated || !session) return;
     if (!canView) {
-      router.replace("/pos");
+      router.replace("/");
       return;
     }
     listAdminProducts(session.token)

@@ -22,7 +22,7 @@ export default function LoginPage() {
     setError("");
     const result = await login(email, password);
     if (result.ok) {
-      router.replace("/pos");
+      router.replace("/");
     } else {
       setError(result.error);
       setLoading(false);

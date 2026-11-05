@@ -75,7 +75,7 @@ export default function SettingsPage() {
   useEffect(() => {
     if (!hasHydrated || !session) return;
     if (!canManage) {
-      router.replace("/pos");
+      router.replace("/");
       return;
     }
     getSettings(session.token)

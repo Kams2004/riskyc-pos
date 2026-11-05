@@ -3,32 +3,11 @@
 import { useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import Link from "next/link";
-import {
-  ShoppingCart,
-  Receipt,
-  AlertTriangle,
-  Settings as SettingsIcon,
-  LogOut,
-  Wifi,
-  WifiOff,
-  ChevronDown,
-  Loader2,
-  Package,
-  ClipboardList,
-} from "lucide-react";
+import { LogOut, Wifi, WifiOff, ChevronDown, Loader2 } from "lucide-react";
 import clsx from "clsx";
 import { usePosAuthStore } from "@/lib/authStore";
 import { canReachApi } from "@/lib/apiClient";
-
-// Products/Orders appear as soon as an admin grants the cashier's role those permissions (see useSessionRefresh).
-const NAV_ITEMS = [
-  { href: "/pos", label: "Sale", icon: ShoppingCart },
-  { href: "/sales", label: "Sales History", icon: Receipt },
-  { href: "/orders", label: "Orders", icon: ClipboardList, permission: "VIEW_ORDERS" },
-  { href: "/products", label: "Products", icon: Package, permission: "VIEW_PRODUCTS" },
-  { href: "/reconciliation", label: "Reconciliation", icon: AlertTriangle },
-  { href: "/settings", label: "Register Settings", icon: SettingsIcon, permission: "MANAGE_POS" },
-];
+import { allowedNavItems, navItemFor } from "@/lib/posNav";
 
 function useSessionRefresh(active: boolean) {
   const refreshSession = usePosAuthStore((s) => s.refreshSession);
@@ -103,7 +82,15 @@ export default function PosShell({
     if (!session) router.replace("/login");
   }, [hasHydrated, session, router]);
 
-  if (!hasHydrated || !session) {
+  // A screen the cashier's role doesn't allow (typed URL, or a permission removed while it was open): send them to
+  // the first screen they can use. Items appear and disappear live as roles change (see useSessionRefresh).
+  const currentItem = navItemFor(pathname);
+  const blocked = !!session && !!currentItem && !hasPermission(currentItem.permission);
+  useEffect(() => {
+    if (hasHydrated && blocked) router.replace("/");
+  }, [hasHydrated, blocked, router]);
+
+  if (!hasHydrated || !session || blocked) {
     return (
       <div className="h-screen flex items-center justify-center bg-gray-50">
         <Loader2 size={22} className="animate-spin text-brand-400" />
@@ -111,7 +98,7 @@ export default function PosShell({
     );
   }
 
-  const visibleNav = NAV_ITEMS.filter((item) => !item.permission || hasPermission(item.permission));
+  const visibleNav = allowedNavItems(hasPermission);
 
   return (
     <div className="h-screen bg-gray-100 flex overflow-hidden">

@@ -16,7 +16,7 @@ import PosShell from "@/components/PosShell";
 export default function ReconciliationPage() {
   const session = usePosAuthStore((s) => s.session);
   const hasHydrated = usePosAuthStore((s) => s.hasHydrated);
-  const canManage = usePosAuthStore((s) => s.hasPermission("MANAGE_POS"));
+  const canManage = usePosAuthStore((s) => s.hasPermission("POS_RECONCILE"));
 
   const [lines, setLines] = useState<PosReconciliationLine[]>([]);
   const [loading, setLoading] = useState(true);

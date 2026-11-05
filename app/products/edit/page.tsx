@@ -32,7 +32,7 @@ function EditProduct() {
   useEffect(() => {
     if (!hasHydrated || !session) return;
     if (!canView) {
-      router.replace("/pos");
+      router.replace("/");
       return;
     }
     if (!id) {

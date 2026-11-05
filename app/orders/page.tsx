@@ -55,7 +55,7 @@ export default function OrdersPage() {
   useEffect(() => {
     if (!hasHydrated || !session) return;
     if (!canView) {
-      router.replace("/pos");
+      router.replace("/");
       return;
     }
     listOrders(session.token)
