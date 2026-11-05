@@ -175,7 +175,7 @@ export default function ProductsPage() {
                         <td className="px-4 py-3">
                           <div className="flex items-center justify-center gap-1">
                             <Link
-                              href={`/products/${product.id}`}
+                              href={`/products/edit?id=${product.id}`}
                               title={canEdit ? "Edit" : "View"}
                               className="p-1.5 rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-600"
                             >

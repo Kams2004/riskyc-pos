@@ -1,0 +1,72 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Riskyc POS",
+  "version": "../package.json",
+  "identifier": "com.riskycfashion.pos",
+  "build": {
+    "devUrl": "http://localhost:3002",
+    "frontendDist": "../.next-desktop",
+    "beforeBuildCommand": "node scripts/build-desktop.mjs"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "Riskyc POS",
+        "width": 1440,
+        "height": 900,
+        "minWidth": 1024,
+        "minHeight": 680,
+        "maximized": true,
+        "center": true
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": [
+      "nsis",
+      "msi",
+      "deb",
+      "appimage"
+    ],
+    "createUpdaterArtifacts": true,
+    "publisher": "Riskyc Fashion",
+    "category": "Business",
+    "shortDescription": "Riskyc Fashion point of sale",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser"
+      }
+    },
+    "linux": {
+      "deb": {
+        "depends": [
+          "libwebkit2gtk-4.1-0",
+          "libgtk-3-0"
+        ]
+      }
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEM0MUJGRDM4MkM4RjJENEQKUldSTkxZOHNPUDBieEpHZXBwenhOSm5ibGUzT3ZWMzg2bEZCRTJ4ZFl2cEF6aGpJRTNsL0RXc2YK",
+      "endpoints": [
+        "https://github.com/Kams2004/riskyc-pos/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
+    }
+  }
+}

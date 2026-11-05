@@ -1,0 +1,64 @@
+# Builds the Riskyc POS desktop installers (Windows + Linux) and attaches them to a GitHub release.
+# Trigger: push a tag like v0.2.0 (the version must match package.json), or run it by hand from the Actions tab.
+#
+# Repository settings it needs (Settings → Secrets and variables → Actions):
+#   secret   TAURI_SIGNING_PRIVATE_KEY           — signs updates so tills only install genuine releases
+#   secret   TAURI_SIGNING_PRIVATE_KEY_PASSWORD  — that key's password (empty if none)
+#   variable POS_API_BASE_URL                    — the live backend the tills talk to, e.g. https://api.example.com
+#
+# The release is created as a draft. Publishing it is what makes installed tills pick up the update.
+name: Desktop release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: ubuntu-22.04
+          - platform: windows-latest
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Linux build libraries
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - run: npm ci
+
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          NEXT_PUBLIC_API_BASE_URL: ${{ vars.POS_API_BASE_URL }}
+          # linuxdeploy's bundled strip can't read newer system libraries; skipping it only makes the AppImage a bit larger.
+          NO_STRIP: "true"
+        with:
+          tagName: ${{ github.ref_type == 'tag' && github.ref_name || 'v__VERSION__' }}
+          releaseName: Riskyc POS ${{ github.ref_type == 'tag' && github.ref_name || 'v__VERSION__' }}
+          releaseBody: Install on a new till, then enter the code from POS Settings → Caisses — tills. Installed tills update themselves once this release is published.
+          releaseDraft: true
+          prerelease: false

@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { Suspense, useEffect, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Loader2 } from "lucide-react";
 import { usePosAuthStore } from "@/lib/authStore";
 import { getProduct } from "@/lib/api/products";
@@ -10,8 +10,18 @@ import PosShell from "@/components/PosShell";
 import BackButton from "@/components/BackButton";
 import ProductForm from "@/components/ProductForm";
 
+// /products/edit?id=… rather than /products/[id]: a static export (the desktop app's build) can't serve
+// dynamic route segments it didn't know about at build time.
 export default function EditProductPage() {
-  const { id } = useParams<{ id: string }>();
+  return (
+    <Suspense fallback={null}>
+      <EditProduct />
+    </Suspense>
+  );
+}
+
+function EditProduct() {
+  const id = useSearchParams().get("id") ?? "";
   const router = useRouter();
   const session = usePosAuthStore((s) => s.session);
   const hasHydrated = usePosAuthStore((s) => s.hasHydrated);
@@ -23,6 +33,10 @@ export default function EditProductPage() {
     if (!hasHydrated || !session) return;
     if (!canView) {
       router.replace("/pos");
+      return;
+    }
+    if (!id) {
+      setError("No product selected.");
       return;
     }
     getProduct(id, session.token)
