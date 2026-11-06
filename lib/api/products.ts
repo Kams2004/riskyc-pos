@@ -1,5 +1,6 @@
 import { apiFetch, API_BASE_URL, handleUnauthorized } from "@/lib/apiClient";
 import { Category, MediaItem, Product, ProductColor } from "@/lib/types";
+import { withOfflineCopy } from "@/lib/api/pos";
 
 /** Mirrors the main admin's lib/api/products.ts — same backend endpoints, same per-section permissions. */
 
@@ -8,8 +9,9 @@ export function listCategories() {
 }
 
 /** Includes hidden products; scoped server-side to the cashier's own shop. */
+/** Desktop app: the last list stays readable offline (see withOfflineCopy). */
 export function listAdminProducts(token: string) {
-  return apiFetch<Product[]>("/api/products/admin", { token });
+  return withOfflineCopy("adminProducts", token, () => apiFetch<Product[]>("/api/products/admin", { token }));
 }
 
 export function getProduct(id: string, token: string) {

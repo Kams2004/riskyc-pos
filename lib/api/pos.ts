@@ -1,13 +1,19 @@
 import { apiFetch, ApiError, API_BASE_URL } from "@/lib/apiClient";
 import { desktop, isDesktop } from "@/lib/desktop";
+import { useTillStore } from "@/lib/tillStore";
 import { OnlineOrder, PosCatalog, PosPaymentMethod, PosReconciliationLine, PosSale, PosSettings } from "@/lib/types";
 
 /**
  * Desktop app: every successful load refreshes the till's encrypted offline copy, and when the server can't be
- * reached (or the cashier signed in offline, with no server token) the offline copy is used instead.
+ * reached (or the cashier signed in offline, with no server token) the offline copy is used instead. Already known
+ * to be offline, the copy is returned at once rather than after the request times out.
  */
-async function withOfflineCopy<T>(cacheKey: string, token: string, load: () => Promise<T>): Promise<T> {
+export async function withOfflineCopy<T>(cacheKey: string, token: string, load: () => Promise<T>): Promise<T> {
   if (!isDesktop()) return load();
+  if (!useTillStore.getState().online || !token) {
+    const cached = await desktop.cacheGet<T>(cacheKey).catch(() => null);
+    if (cached) return cached;
+  }
   try {
     const fresh = await load();
     desktop.cacheSet(cacheKey, fresh).catch(() => {});
@@ -26,17 +32,17 @@ export function getCatalog(token: string) {
 }
 
 export function listSales(token: string) {
-  return apiFetch<PosSale[]>("/api/pos/sales", { token });
+  return withOfflineCopy("sales", token, () => apiFetch<PosSale[]>("/api/pos/sales", { token }));
 }
 
 /** Online orders that reached PACKAGED — counted as completed sales alongside till sales. */
 export function listOnlineSales(token: string) {
-  return apiFetch<OnlineOrder[]>("/api/pos/online-sales", { token });
+  return withOfflineCopy("onlineSales", token, () => apiFetch<OnlineOrder[]>("/api/pos/online-sales", { token }));
 }
 
 /** Every online order for this shop, any status — needs VIEW_ORDERS. */
 export function listOrders(token: string) {
-  return apiFetch<OnlineOrder[]>("/api/orders", { token });
+  return withOfflineCopy("orders", token, () => apiFetch<OnlineOrder[]>("/api/orders", { token }));
 }
 
 export function listFlaggedSales(token: string) {
@@ -44,7 +50,7 @@ export function listFlaggedSales(token: string) {
 }
 
 export function listReconciliation(token: string) {
-  return apiFetch<PosReconciliationLine[]>("/api/pos/reconciliation", { token });
+  return withOfflineCopy("reconciliation", token, () => apiFetch<PosReconciliationLine[]>("/api/pos/reconciliation", { token }));
 }
 
 export function resolveReconciliation(token: string, itemId: string) {
