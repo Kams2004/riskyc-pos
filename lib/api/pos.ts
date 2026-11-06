@@ -1,6 +1,7 @@
 import { apiFetch, ApiError, API_BASE_URL } from "@/lib/apiClient";
 import { desktop, isDesktop } from "@/lib/desktop";
 import { useTillStore } from "@/lib/tillStore";
+import { t } from "@/lib/i18n";
 import { OnlineOrder, PosCatalog, PosPaymentMethod, PosReconciliationLine, PosSale, PosSettings } from "@/lib/types";
 
 /**
@@ -90,7 +91,7 @@ export async function uploadLogo(token: string, file: File): Promise<PosSettings
     headers: { Authorization: `Bearer ${token}` },
     body: form,
   });
-  if (!res.ok) throw new Error((await res.json().catch(() => ({}))).message || "Couldn't upload logo");
+  if (!res.ok) throw new Error((await res.json().catch(() => ({}))).message || t("settings.logoUploadFailed"));
   return res.json();
 }
 

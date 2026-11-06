@@ -8,37 +8,38 @@ import { usePosAuthStore } from "@/lib/authStore";
 import { listOrders } from "@/lib/api/pos";
 import { OnlineOrder, OrderStatus } from "@/lib/types";
 import PosShell from "@/components/PosShell";
+import { TKey, useT } from "@/lib/i18n";
 import Pagination from "@/components/Pagination";
 import { usePagination } from "@/lib/usePagination";
 
-const STATUS_META: Record<OrderStatus, { label: string; classes: string }> = {
-  PENDING: { label: "Pending", classes: "bg-gray-100 text-gray-600" },
-  AWAITING_PAYMENT: { label: "Awaiting payment", classes: "bg-amber-50 text-amber-700" },
-  REVIEWING: { label: "Payment review", classes: "bg-purple-50 text-purple-700" },
-  VALIDATED: { label: "Validated", classes: "bg-blue-50 text-blue-700" },
-  PACKAGING: { label: "Packing", classes: "bg-indigo-50 text-indigo-700" },
-  PACKAGED: { label: "Completed", classes: "bg-green-50 text-green-700" },
-  CANCELLED: { label: "Cancelled", classes: "bg-red-50 text-red-600" },
+const STATUS_META: Record<OrderStatus, { label: TKey; classes: string }> = {
+  PENDING: { label: "status.PENDING", classes: "bg-gray-100 text-gray-600" },
+  AWAITING_PAYMENT: { label: "status.AWAITING_PAYMENT", classes: "bg-amber-50 text-amber-700" },
+  REVIEWING: { label: "status.REVIEWING", classes: "bg-purple-50 text-purple-700" },
+  VALIDATED: { label: "status.VALIDATED", classes: "bg-blue-50 text-blue-700" },
+  PACKAGING: { label: "status.PACKAGING", classes: "bg-indigo-50 text-indigo-700" },
+  PACKAGED: { label: "status.PACKAGED", classes: "bg-green-50 text-green-700" },
+  CANCELLED: { label: "status.CANCELLED", classes: "bg-red-50 text-red-600" },
 };
 
-const TABS: { value: "all" | "active" | OrderStatus; label: string }[] = [
-  { value: "all", label: "All" },
-  { value: "active", label: "In progress" },
-  { value: "PACKAGED", label: "Completed" },
-  { value: "CANCELLED", label: "Cancelled" },
+const TABS: { value: "all" | "active" | OrderStatus; label: TKey }[] = [
+  { value: "all", label: "orders.tabAll" },
+  { value: "active", label: "orders.tabActive" },
+  { value: "PACKAGED", label: "status.PACKAGED" },
+  { value: "CANCELLED", label: "status.CANCELLED" },
 ];
 
 const ACTIVE_STATUSES: OrderStatus[] = ["PENDING", "AWAITING_PAYMENT", "REVIEWING", "VALIDATED", "PACKAGING"];
 
-const PAYMENT_LABELS = { ORANGE_MONEY: "Orange Money", MOBILE_MONEY: "MTN MoMo" } as const;
+const PAYMENT_LABEL_KEYS = { ORANGE_MONEY: "pay.orangeMoney", MOBILE_MONEY: "pay.mtnMomo" } as const;
 
 function formatPrice(n: number) {
   return `${Math.round(n).toLocaleString("en-US")} FCFA`;
 }
 
-function formatDate(iso: string) {
+function formatDate(iso: string, locale: string) {
   const d = new Date(iso);
-  return `${d.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })} · ${d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}`;
+  return `${d.toLocaleDateString(locale, { day: "2-digit", month: "short", year: "numeric" })} · ${d.toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit" })}`;
 }
 
 export default function OrdersPage() {
@@ -46,6 +47,7 @@ export default function OrdersPage() {
   const session = usePosAuthStore((s) => s.session);
   const hasHydrated = usePosAuthStore((s) => s.hasHydrated);
   const canView = usePosAuthStore((s) => s.hasPermission("VIEW_ORDERS"));
+  const { t, locale } = useT();
 
   const [orders, setOrders] = useState<OnlineOrder[]>([]);
   const [loading, setLoading] = useState(true);
@@ -62,7 +64,7 @@ export default function OrdersPage() {
     }
     listOrders(session.token)
       .then(setOrders)
-      .catch((e) => setError(e instanceof Error ? e.message : "Couldn't load orders."))
+      .catch((e) => setError(e instanceof Error ? e.message : t("orders.loadFailed")))
       .finally(() => setLoading(false));
   }, [hasHydrated, session, canView, router]);
 
@@ -93,26 +95,24 @@ export default function OrdersPage() {
   const pagination = usePagination(filtered, 10, [tab, search]);
 
   return (
-    <PosShell title="Orders">
+    <PosShell title={t("orders.title")}>
       <div className="flex-1 overflow-y-auto">
         <div className="max-w-[1600px] mx-auto p-4 sm:p-6 lg:p-8 space-y-5">
-          <p className="text-sm text-gray-400 -mt-1">
-            Orders placed on the online shop. Completed orders also count as sales in Sales History.
-          </p>
+          <p className="text-sm text-gray-400 -mt-1">{t("orders.intro")}</p>
 
           <div className="bg-white border border-gray-200 shadow-sm rounded-2xl p-4 flex flex-wrap items-center gap-3">
             <div className="flex gap-1 bg-gray-100 rounded-xl p-1">
-              {TABS.map((t) => (
+              {TABS.map((tabDef) => (
                 <button
-                  key={t.value}
-                  onClick={() => setTab(t.value)}
+                  key={tabDef.value}
+                  onClick={() => setTab(tabDef.value)}
                   className={clsx(
                     "px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-colors",
-                    tab === t.value ? "bg-white text-gray-900 shadow-sm" : "text-gray-500 hover:text-gray-800"
+                    tab === tabDef.value ? "bg-white text-gray-900 shadow-sm" : "text-gray-500 hover:text-gray-800"
                   )}
                 >
-                  {t.label}
-                  <span className="ml-1.5 text-gray-400 tabular-nums">{counts[t.value as keyof typeof counts]}</span>
+                  {t(tabDef.label)}
+                  <span className="ml-1.5 text-gray-400 tabular-nums">{counts[tabDef.value as keyof typeof counts]}</span>
                 </button>
               ))}
             </div>
@@ -121,7 +121,7 @@ export default function OrdersPage() {
               <input
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search by order #, customer, phone, product…"
+                placeholder={t("orders.search")}
                 className="w-full bg-gray-100 border border-gray-200 rounded-xl pl-9 pr-3 py-2 text-sm outline-none focus:border-brand-400 focus:bg-white"
               />
             </div>
@@ -134,21 +134,21 @@ export default function OrdersPage() {
           ) : error ? (
             <div className="text-sm text-red-600 bg-red-50 rounded-xl px-4 py-3">{error}</div>
           ) : filtered.length === 0 ? (
-            <p className="text-center text-gray-400 py-16 text-sm">No orders here.</p>
+            <p className="text-center text-gray-400 py-16 text-sm">{t("orders.none")}</p>
           ) : (
             <>
             <div className="bg-white border border-gray-200 shadow-sm rounded-2xl overflow-hidden overflow-x-auto">
               <table className="w-full min-w-[860px] border-collapse text-sm">
                 <thead>
                   <tr className="bg-gray-50 border-b border-gray-200 text-[11px] font-semibold uppercase tracking-wide text-gray-500">
-                    <th className="px-4 py-3 text-left">Order #</th>
-                    <th className="px-4 py-3 text-left">Placed</th>
-                    <th className="px-4 py-3 text-left">Customer</th>
-                    <th className="px-4 py-3 text-left">Items</th>
-                    <th className="px-4 py-3 text-left">Amount</th>
-                    <th className="px-4 py-3 text-left">Payment</th>
-                    <th className="px-4 py-3 text-left">Status</th>
-                    <th className="px-4 py-3 text-center">Details</th>
+                    <th className="px-4 py-3 text-left">{t("orders.colOrder")}</th>
+                    <th className="px-4 py-3 text-left">{t("orders.colPlaced")}</th>
+                    <th className="px-4 py-3 text-left">{t("orders.colCustomer")}</th>
+                    <th className="px-4 py-3 text-left">{t("orders.colItems")}</th>
+                    <th className="px-4 py-3 text-left">{t("orders.colAmount")}</th>
+                    <th className="px-4 py-3 text-left">{t("orders.colPayment")}</th>
+                    <th className="px-4 py-3 text-left">{t("orders.colStatus")}</th>
+                    <th className="px-4 py-3 text-center">{t("orders.colDetails")}</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200">
@@ -160,26 +160,26 @@ export default function OrdersPage() {
                       <Fragment key={order.id}>
                         <tr className="hover:bg-gray-50/60 transition-colors">
                           <td className="px-4 py-3 font-mono text-xs font-bold text-gray-700">{order.id.slice(0, 8)}…</td>
-                          <td className="px-4 py-3 text-xs text-gray-500 whitespace-nowrap">{formatDate(order.createdAt)}</td>
+                          <td className="px-4 py-3 text-xs text-gray-500 whitespace-nowrap">{formatDate(order.createdAt, locale)}</td>
                           <td className="px-4 py-3 text-xs text-gray-700">{c ? `${c.firstName} ${c.lastName}` : "—"}</td>
                           <td className="px-4 py-3 text-xs text-gray-500">
-                            {qty} item{qty !== 1 ? "s" : ""}
+                            {t(qty === 1 ? "items.one" : "items.other", { n: qty })}
                           </td>
                           <td className="px-4 py-3 text-sm font-bold tabular-nums text-gray-900">{formatPrice(order.total)}</td>
                           <td className="px-4 py-3">
                             <span className="inline-flex text-[11px] font-medium px-2 py-1 rounded-lg bg-gray-100 text-gray-600 whitespace-nowrap">
-                              {order.paymentMethod ? PAYMENT_LABELS[order.paymentMethod] : "Not chosen"}
+                              {order.paymentMethod ? t(PAYMENT_LABEL_KEYS[order.paymentMethod]) : t("orders.notChosen")}
                             </span>
                           </td>
                           <td className="px-4 py-3">
                             <span className={clsx("text-[11px] font-bold px-2 py-1 rounded-full whitespace-nowrap", STATUS_META[order.status].classes)}>
-                              {STATUS_META[order.status].label}
+                              {t(STATUS_META[order.status].label)}
                             </span>
                           </td>
                           <td className="px-4 py-3 text-center">
                             <button
                               onClick={() => setExpandedId(expanded ? null : order.id)}
-                              title="View order"
+                              title={t("orders.view")}
                               className="p-1.5 rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-600"
                             >
                               {expanded ? <ChevronUp size={14} /> : <Eye size={14} />}
@@ -209,7 +209,7 @@ export default function OrdersPage() {
                                     </div>
                                   ))}
                                   {order.status === "CANCELLED" && order.rejectionReason && (
-                                    <p className="text-[11px] text-red-500 pt-1">Reason: {order.rejectionReason}</p>
+                                    <p className="text-[11px] text-red-500 pt-1">{t("orders.reason", { reason: order.rejectionReason })}</p>
                                   )}
                                 </div>
                                 {c && (
@@ -227,8 +227,9 @@ export default function OrdersPage() {
                                     )}
                                     {order.packagingCompletedAt && (
                                       <p className="text-[11px] text-gray-400 pt-1">
-                                        Packed {formatDate(order.packagingCompletedAt)}
-                                        {order.packagingCompletedByName ? ` by ${order.packagingCompletedByName}` : ""}
+                                        {order.packagingCompletedByName
+                                          ? t("orders.packedBy", { date: formatDate(order.packagingCompletedAt, locale), name: order.packagingCompletedByName })
+                                          : t("orders.packed", { date: formatDate(order.packagingCompletedAt, locale) })}
                                       </p>
                                     )}
                                   </div>
@@ -248,7 +249,7 @@ export default function OrdersPage() {
               totalPages={pagination.totalPages}
               total={pagination.total}
               pageSize={pagination.pageSize}
-              noun="orders"
+              noun={t("noun.orders")}
               onPageChange={pagination.setPage}
             />
             </>

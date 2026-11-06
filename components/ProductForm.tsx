@@ -8,6 +8,7 @@ import { usePosAuthStore } from "@/lib/authStore";
 import * as productsApi from "@/lib/api/products";
 import { variantKey } from "@/lib/stock";
 import { Badge, BulkPriceTier, Category, MediaItem, Product, ProductColor } from "@/lib/types";
+import { useT } from "@/lib/i18n";
 import ToggleSwitch from "@/components/ToggleSwitch";
 
 const SIZE_PRESETS = ["XS", "S", "M", "L", "XL", "XXL"];
@@ -37,7 +38,7 @@ function Section({
         </div>
         {!granted && (
           <span className="flex items-center gap-1 text-[10px] font-bold text-gray-500 bg-gray-100 px-2 py-1 rounded-full flex-shrink-0">
-            <Lock size={10} /> No access
+            <Lock size={10} /> <NoAccess />
           </span>
         )}
       </div>
@@ -71,8 +72,14 @@ function sameCell(a: StockCell, b: StockCell) {
   return a.unlimited === b.unlimited && (a.unlimited || Number(a.value || 0) === Number(b.value || 0));
 }
 
+function NoAccess() {
+  const { t } = useT();
+  return <>{t("pf.noAccess")}</>;
+}
+
 export default function ProductForm({ initial }: { initial?: Product }) {
   const router = useRouter();
+  const { t } = useT();
   const session = usePosAuthStore((s) => s.session);
   const hasPermission = usePosAuthStore((s) => s.hasPermission);
   const isNew = !initial;
@@ -122,7 +129,7 @@ export default function ProductForm({ initial }: { initial?: Product }) {
           setSubcategorySlug((cur) => cur || allowed[0].subcategories[0]?.slug || "");
         }
       })
-      .catch(() => setError("Couldn't load categories."));
+      .catch(() => setError(t("pf.categoriesFailed")));
   }, [session?.enterpriseId, session?.enterpriseCategoryIds, isNew]);
 
   const pendingRef = useRef(pendingFiles);
@@ -150,26 +157,26 @@ export default function ProductForm({ initial }: { initial?: Product }) {
   };
 
   const removeExistingMedia = async (media: MediaItem) => {
-    if (!window.confirm("Delete this photo from the product? This can't be undone.")) return;
+    if (!window.confirm(t("pf.deletePhotoConfirm"))) return;
     try {
       await productsApi.deleteMedia(media.id, token);
       setExistingMedia((prev) => prev.filter((m) => m.id !== media.id));
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Couldn't delete the photo.");
+      setError(err instanceof Error ? err.message : t("pf.deletePhotoFailed"));
     }
   };
 
   const validate = (): string | null => {
-    if (!name.trim()) return "Give the product a name.";
-    if (!categorySlug) return "Choose a category.";
+    if (!name.trim()) return t("pf.errName");
+    if (!categorySlug) return t("pf.errCategory");
     const priceNum = Number(price);
-    if (price === "" || Number.isNaN(priceNum) || priceNum < 0) return "Enter a valid price (0 or more).";
-    if (originalPrice && (Number.isNaN(Number(originalPrice)) || Number(originalPrice) < 0)) return "The original price must be a number.";
-    if (colors.some((c) => !c.name.trim())) return "Every color needs a name.";
-    if (new Set(colors.map((c) => c.name.trim().toLowerCase())).size !== colors.length) return "Two colors have the same name.";
-    if (bulkPrices.some((t) => t.quantity <= 1 || t.price <= 0)) return "Each bulk price needs a quantity above 1 and a price above 0.";
-    if (isNew && canImages && pendingFiles.length === 0) return "Add at least one photo.";
-    if (Object.values(stockEdits).some((c) => !c.unlimited && c.value !== "" && !/^\d+$/.test(c.value))) return "Stock quantities must be whole numbers.";
+    if (price === "" || Number.isNaN(priceNum) || priceNum < 0) return t("pf.errPrice");
+    if (originalPrice && (Number.isNaN(Number(originalPrice)) || Number(originalPrice) < 0)) return t("pf.errOriginalPrice");
+    if (colors.some((c) => !c.name.trim())) return t("pf.errColorName");
+    if (new Set(colors.map((c) => c.name.trim().toLowerCase())).size !== colors.length) return t("pf.errColorDup");
+    if (bulkPrices.some((tier) => tier.quantity <= 1 || tier.price <= 0)) return t("pf.errBulk");
+    if (isNew && canImages && pendingFiles.length === 0) return t("pf.errPhoto");
+    if (Object.values(stockEdits).some((c) => !c.unlimited && c.value !== "" && !/^\d+$/.test(c.value))) return t("pf.errStock");
     return null;
   };
 
@@ -273,7 +280,7 @@ export default function ProductForm({ initial }: { initial?: Product }) {
       setSaved(true);
       setTimeout(() => router.push("/products"), 700);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Couldn't save the product.");
+      setError(err instanceof Error ? err.message : t("pf.saveFailed"));
       setSaving(false);
     }
   };
@@ -284,25 +291,25 @@ export default function ProductForm({ initial }: { initial?: Product }) {
     <div className="space-y-6">
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 items-start">
         <div className="space-y-6 min-w-0">
-          <Section title="Basic information" granted={canInfo}>
+          <Section title={t("pf.basic")} granted={canInfo}>
             <div className="space-y-4">
               <div>
-                <label className={labelClass}>Product name</label>
-                <input value={name} onChange={(e) => setName(e.target.value)} className={inputClass} placeholder="e.g. Ankara wrap dress" />
+                <label className={labelClass}>{t("pf.name")}</label>
+                <input value={name} onChange={(e) => setName(e.target.value)} className={inputClass} placeholder={t("pf.namePlaceholder")} />
               </div>
               <div>
-                <label className={labelClass}>Description</label>
+                <label className={labelClass}>{t("pf.description")}</label>
                 <textarea
                   value={description}
                   onChange={(e) => setDescription(e.target.value)}
                   rows={4}
                   className={clsx(inputClass, "resize-none")}
-                  placeholder="Fabric, fit, care instructions…"
+                  placeholder={t("pf.descriptionPlaceholder")}
                 />
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
-                  <label className={labelClass}>Category</label>
+                  <label className={labelClass}>{t("pf.category")}</label>
                   <select
                     value={categorySlug}
                     onChange={(e) => {
@@ -321,9 +328,9 @@ export default function ProductForm({ initial }: { initial?: Product }) {
                   </select>
                 </div>
                 <div>
-                  <label className={labelClass}>Subcategory</label>
+                  <label className={labelClass}>{t("pf.subcategory")}</label>
                   <select value={subcategorySlug} onChange={(e) => setSubcategorySlug(e.target.value)} className={inputClass}>
-                    <option value="">None</option>
+                    <option value="">{t("pf.none")}</option>
                     {(category?.subcategories ?? []).map((s) => (
                       <option key={s.id} value={s.slug}>
                         {s.name}
@@ -335,26 +342,26 @@ export default function ProductForm({ initial }: { initial?: Product }) {
             </div>
           </Section>
 
-          <Section title="Pricing" granted={canPricing}>
+          <Section title={t("pf.pricing")} granted={canPricing}>
             <div className="space-y-4">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
-                  <label className={labelClass}>Price (FCFA)</label>
+                  <label className={labelClass}>{t("pf.price")}</label>
                   <input inputMode="numeric" value={price} onChange={(e) => setPrice(e.target.value)} className={inputClass} placeholder="0" />
                 </div>
                 <div>
-                  <label className={labelClass}>Original price (optional)</label>
+                  <label className={labelClass}>{t("pf.originalPrice")}</label>
                   <input
                     inputMode="numeric"
                     value={originalPrice}
                     onChange={(e) => setOriginalPrice(e.target.value)}
                     className={inputClass}
-                    placeholder="Shown crossed out"
+                    placeholder={t("pf.originalPricePlaceholder")}
                   />
                 </div>
               </div>
               <div>
-                <label className={labelClass}>Bulk prices</label>
+                <label className={labelClass}>{t("pf.bulkPrices")}</label>
                 <div className="space-y-2">
                   {bulkPrices.map((tier, i) => (
                     <div key={i} className="flex items-center gap-2">
@@ -363,15 +370,15 @@ export default function ProductForm({ initial }: { initial?: Product }) {
                         value={tier.quantity || ""}
                         onChange={(e) => setBulkPrices((prev) => prev.map((t, idx) => (idx === i ? { ...t, quantity: Number(e.target.value) || 0 } : t)))}
                         className={clsx(inputClass, "w-28")}
-                        placeholder="Qty"
+                        placeholder={t("pf.qty")}
                       />
-                      <span className="text-xs text-gray-400">for</span>
+                      <span className="text-xs text-gray-400">{t("pf.for")}</span>
                       <input
                         inputMode="numeric"
                         value={tier.price || ""}
                         onChange={(e) => setBulkPrices((prev) => prev.map((t, idx) => (idx === i ? { ...t, price: Number(e.target.value) || 0 } : t)))}
                         className={inputClass}
-                        placeholder="Total price (FCFA)"
+                        placeholder={t("pf.totalPrice")}
                       />
                       <button
                         type="button"
@@ -387,14 +394,14 @@ export default function ProductForm({ initial }: { initial?: Product }) {
                     onClick={() => setBulkPrices((prev) => [...prev, { quantity: 0, price: 0 }])}
                     className="flex items-center gap-1.5 text-xs font-semibold text-brand-600 hover:text-brand-700"
                   >
-                    <Plus size={13} /> Add a bulk price
+                    <Plus size={13} /> {t("pf.addBulk")}
                   </button>
                 </div>
               </div>
             </div>
           </Section>
 
-          <Section title="Colors" granted={canColors} hint="Leave empty if the product comes in a single color.">
+          <Section title={t("pf.colors")} granted={canColors} hint={t("pf.colorsHint")}>
             <div className="space-y-2">
               {colors.map((c, i) => (
                 <div key={c.id ?? `new-${i}`} className="flex items-center gap-2">
@@ -408,7 +415,7 @@ export default function ProductForm({ initial }: { initial?: Product }) {
                     value={c.name}
                     onChange={(e) => setColors((prev) => prev.map((col, idx) => (idx === i ? { ...col, name: e.target.value } : col)))}
                     className={inputClass}
-                    placeholder="Color name, e.g. Black"
+                    placeholder={t("pf.colorPlaceholder")}
                   />
                   <button
                     type="button"
@@ -424,15 +431,15 @@ export default function ProductForm({ initial }: { initial?: Product }) {
                 onClick={() => setColors((prev) => [...prev, { name: "", hex: "#888888" }])}
                 className="flex items-center gap-1.5 text-xs font-semibold text-brand-600 hover:text-brand-700"
               >
-                <Plus size={13} /> Add a color
+                <Plus size={13} /> {t("pf.addColor")}
               </button>
             </div>
           </Section>
 
-          <Section title="Sizes & badge" granted={canDisplay} hint="Leave sizes empty for one-size products.">
+          <Section title={t("pf.sizesBadge")} granted={canDisplay} hint={t("pf.sizesHint")}>
             <div className="space-y-4">
               <div>
-                <label className={labelClass}>Sizes</label>
+                <label className={labelClass}>{t("pf.sizes")}</label>
                 <div className="flex flex-wrap gap-1.5 mb-2">
                   {sizes.map((s) => (
                     <span key={s} className="flex items-center gap-1 text-xs font-semibold bg-gray-100 text-gray-700 pl-2.5 pr-1 py-1 rounded-lg">
@@ -454,7 +461,7 @@ export default function ProductForm({ initial }: { initial?: Product }) {
                       }
                     }}
                     className={inputClass}
-                    placeholder="Type a size and press Enter (e.g. 42)"
+                    placeholder={t("pf.sizePlaceholder")}
                   />
                   <button type="button" onClick={() => addSize(sizeInput)} className="px-3 rounded-xl border border-gray-200 text-gray-600 hover:bg-gray-50">
                     <Plus size={15} />
@@ -474,7 +481,7 @@ export default function ProductForm({ initial }: { initial?: Product }) {
                 </div>
               </div>
               <div>
-                <label className={labelClass}>Badge</label>
+                <label className={labelClass}>{t("pf.badge")}</label>
                 <div className="flex gap-2">
                   {(["", "NEW", "SALE", "HOT"] as const).map((b) => (
                     <button
@@ -486,7 +493,7 @@ export default function ProductForm({ initial }: { initial?: Product }) {
                         badge === b ? "border-brand-500 bg-brand-50 text-brand-700" : "border-gray-200 text-gray-600"
                       )}
                     >
-                      {b || "None"}
+                      {b || t("pf.none")}
                     </button>
                   ))}
                 </div>
@@ -496,7 +503,7 @@ export default function ProductForm({ initial }: { initial?: Product }) {
         </div>
 
         <div className="space-y-6 min-w-0">
-          <Section title="Photos" granted={canImages}>
+          <Section title={t("pf.photos")} granted={canImages}>
             <div className="grid grid-cols-3 sm:grid-cols-4 gap-3">
               {existingMedia
                 .filter((m) => m.type === "IMAGE")
@@ -526,7 +533,7 @@ export default function ProductForm({ initial }: { initial?: Product }) {
                   >
                     <X size={12} />
                   </button>
-                  <span className="absolute bottom-1.5 left-1.5 text-[9px] font-bold bg-brand-500 text-white px-1.5 py-0.5 rounded">NEW</span>
+                  <span className="absolute bottom-1.5 left-1.5 text-[9px] font-bold bg-brand-500 text-white px-1.5 py-0.5 rounded">{t("pf.new")}</span>
                 </div>
               ))}
               <button
@@ -535,25 +542,21 @@ export default function ProductForm({ initial }: { initial?: Product }) {
                 className="aspect-square rounded-xl border-2 border-dashed border-gray-300 flex flex-col items-center justify-center gap-1 text-gray-400 hover:border-brand-300 hover:text-brand-500 transition-colors"
               >
                 <ImagePlus size={20} />
-                <span className="text-[11px] font-semibold">Add photos</span>
+                <span className="text-[11px] font-semibold">{t("pf.addPhotos")}</span>
               </button>
               <input ref={fileInputRef} type="file" accept="image/*" multiple className="hidden" onChange={handleFilesPicked} />
             </div>
           </Section>
 
           <Section
-            title="Stock"
+            title={t("pf.stock")}
             granted={canStock}
-            hint={
-              allUnlimited
-                ? "Every size is unlimited and never sells out. Type a quantity in a box to start counting that size."
-                : "Counted sizes sell out at 0 (an empty box means none left); sizes marked ∞ never sell out. Every sale, in store or online, takes from these numbers."
-            }
+            hint={allUnlimited ? t("pf.stockHintAll") : t("pf.stockHint")}
           >
             <div className="flex items-center justify-between gap-3 bg-gray-50 rounded-xl px-3.5 py-2.5 mb-3">
               <div>
-                <p className="text-sm font-semibold text-gray-900">Unlimited stock</p>
-                <p className="text-[11px] text-gray-500">Every size never sells out. Use ∞ in a box to make just that size unlimited.</p>
+                <p className="text-sm font-semibold text-gray-900">{t("pf.unlimitedStock")}</p>
+                <p className="text-[11px] text-gray-500">{t("pf.unlimitedStockHint")}</p>
               </div>
               <ToggleSwitch
                 checked={allUnlimited}
@@ -568,10 +571,10 @@ export default function ProductForm({ initial }: { initial?: Product }) {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="text-[11px] font-bold uppercase tracking-wide text-gray-900">
-                    <th className="text-left pb-2 pr-3">{colors.length > 0 ? "Color" : ""}</th>
+                    <th className="text-left pb-2 pr-3">{colors.length > 0 ? t("pf.color") : ""}</th>
                     {sizeNames.map((s) => (
                       <th key={s || "one"} className="pb-2 px-1 text-center min-w-[116px]">
-                        {s || "Quantity"}
+                        {s || t("pf.quantity")}
                       </th>
                     ))}
                   </tr>
@@ -596,7 +599,7 @@ export default function ProductForm({ initial }: { initial?: Product }) {
                             <div className="flex items-center gap-1">
                               <input
                                 inputMode="numeric"
-                                aria-label={`Stock ${[c, s].filter(Boolean).join(" ") || "quantity"}`}
+                                aria-label={t("pf.stockAria", { what: [c, s].filter(Boolean).join(" ") || t("pf.quantityLower") })}
                                 value={cellFor(key).unlimited ? "" : cellFor(key).value}
                                 // Typing a number makes this size counted.
                                 onChange={(e) => setCell(key, { unlimited: false, value: e.target.value.replace(/[^\d]/g, "") })}
@@ -605,7 +608,7 @@ export default function ProductForm({ initial }: { initial?: Product }) {
                               />
                               <button
                                 type="button"
-                                title={cellFor(key).unlimited ? "Unlimited — tap to count this size" : "Make this size unlimited"}
+                                title={cellFor(key).unlimited ? t("pf.unlimitedTapToCount") : t("pf.makeUnlimited")}
                                 aria-pressed={cellFor(key).unlimited}
                                 onClick={() =>
                                   setCell(key, cellFor(key).unlimited ? { unlimited: false, value: "0" } : { unlimited: true, value: "" })
@@ -626,14 +629,14 @@ export default function ProductForm({ initial }: { initial?: Product }) {
                 </tbody>
               </table>
             </div>
-            {colors.some((c) => !c.name.trim()) && <p className="text-[11px] text-amber-600 mt-2">Name every color to set its stock.</p>}
+            {colors.some((c) => !c.name.trim()) && <p className="text-[11px] text-amber-600 mt-2">{t("pf.nameColors")}</p>}
           </Section>
 
-          <Section title="Visibility" granted={canVisibility}>
+          <Section title={t("pf.visibility")} granted={canVisibility}>
             <div className="flex items-center justify-between">
               <div className="pr-4">
-                <p className="text-sm font-semibold text-gray-900">Visible for sale</p>
-                <p className="text-[11px] text-gray-400">When off, the product is hidden from the online shop and the till, but kept here.</p>
+                <p className="text-sm font-semibold text-gray-900">{t("pf.visible")}</p>
+                <p className="text-[11px] text-gray-400">{t("pf.visibleHint")}</p>
               </div>
               <ToggleSwitch checked={!hidden} disabled={!canVisibility} onChange={(v) => setHidden(!v)} />
             </div>
@@ -653,14 +656,14 @@ export default function ProductForm({ initial }: { initial?: Product }) {
           )}
         >
           {saving ? <Loader2 size={16} className="animate-spin" /> : saved ? <Check size={16} /> : null}
-          {saving ? "Saving…" : saved ? "Saved" : isNew ? "Create product" : "Save changes"}
+          {saving ? t("pf.saving") : saved ? t("pf.saved") : isNew ? t("pf.create") : t("pf.save")}
         </button>
         <button
           type="button"
           onClick={() => router.push("/products")}
           className="px-5 py-3 rounded-xl text-sm font-semibold text-gray-600 hover:bg-gray-200"
         >
-          Cancel
+          {t("pf.cancel")}
         </button>
       </div>
     </div>

@@ -1,3 +1,4 @@
+import type { TKey } from "./i18n";
 import { ShoppingCart, Receipt, ClipboardList, Package, AlertTriangle, Settings as SettingsIcon } from "lucide-react";
 
 /**
@@ -5,12 +6,12 @@ import { ShoppingCart, Receipt, ClipboardList, Package, AlertTriangle, Settings 
  * cashier only sees (and can only open) the screens their role allows. VIEW_POS alone just lets someone sign in.
  */
 export const POS_NAV_ITEMS = [
-  { href: "/pos", label: "Sale", icon: ShoppingCart, permission: "POS_SELL" },
-  { href: "/sales", label: "Sales History", icon: Receipt, permission: "POS_VIEW_SALES" },
-  { href: "/orders", label: "Orders", icon: ClipboardList, permission: "VIEW_ORDERS" },
-  { href: "/products", label: "Products", icon: Package, permission: "VIEW_PRODUCTS" },
-  { href: "/reconciliation", label: "Reconciliation", icon: AlertTriangle, permission: "POS_RECONCILE" },
-  { href: "/settings", label: "Register Settings", icon: SettingsIcon, permission: "MANAGE_POS" },
+  { href: "/pos", labelKey: "nav.sale" as TKey, icon: ShoppingCart, permission: "POS_SELL" },
+  { href: "/sales", labelKey: "nav.salesHistory" as TKey, icon: Receipt, permission: "POS_VIEW_SALES" },
+  { href: "/orders", labelKey: "nav.orders" as TKey, icon: ClipboardList, permission: "VIEW_ORDERS" },
+  { href: "/products", labelKey: "nav.products" as TKey, icon: Package, permission: "VIEW_PRODUCTS" },
+  { href: "/reconciliation", labelKey: "nav.reconciliation" as TKey, icon: AlertTriangle, permission: "POS_RECONCILE" },
+  { href: "/settings", labelKey: "nav.settings" as TKey, icon: SettingsIcon, permission: "MANAGE_POS" },
 ] as const;
 
 export function allowedNavItems(hasPermission: (p: string) => boolean) {

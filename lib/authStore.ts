@@ -3,6 +3,7 @@ import { persist } from "zustand/middleware";
 import { apiFetch, ApiError } from "./apiClient";
 import { desktop, isDesktop } from "./desktop";
 import { useTillStore } from "./tillStore";
+import { t } from "./i18n";
 import { usePosCartStore } from "./cartStore";
 
 export interface PosSession {
@@ -67,7 +68,7 @@ export const usePosAuthStore = create<PosAuthStore>()(
             body: JSON.stringify({ email, password }),
           });
           if (!data.permissions.includes("VIEW_POS")) {
-            return { ok: false, error: "This account doesn't have point-of-sale access." };
+            return { ok: false, error: t("auth.noPosAccess") };
           }
           const session = toSession(data);
           if (isDesktop()) {
@@ -75,7 +76,7 @@ export const usePosAuthStore = create<PosAuthStore>()(
             // server then rejects at sync.
             const till = useTillStore.getState().device;
             if (till && session.enterpriseId !== till.enterpriseId) {
-              return { ok: false, error: `This till belongs to ${till.storeName}. Sign in with an account from that shop.` };
+              return { ok: false, error: t("auth.wrongShop", { store: till.storeName }) };
             }
             const { token: _token, ...offlineCopy } = session;
             await desktop.rememberCashier(email, password, offlineCopy).catch(() => {});
@@ -91,10 +92,10 @@ export const usePosAuthStore = create<PosAuthStore>()(
             }
             return {
               ok: false,
-              error: "The server can't be reached. Offline sign-in works for cashiers who signed in on this till in the last 7 days.",
+              error: t("auth.offlineUnavailable"),
             };
           }
-          const message = e instanceof ApiError ? e.message : "Could not reach the server. Please try again.";
+          const message = e instanceof ApiError ? e.message : t("auth.unreachable");
           return { ok: false, error: message };
         }
       },

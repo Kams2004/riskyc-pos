@@ -10,6 +10,7 @@ import { canReachApi } from "@/lib/apiClient";
 import { allowedNavItems, navItemFor } from "@/lib/posNav";
 import OfflineSalesBadge from "@/components/OfflineSalesBadge";
 import { useTillStore } from "@/lib/tillStore";
+import { useLangStore, useT } from "@/lib/i18n";
 
 function useSessionRefresh(active: boolean) {
   const refreshSession = usePosAuthStore((s) => s.refreshSession);
@@ -52,7 +53,32 @@ function useConnectivity() {
   return online;
 }
 
+/** EN/FR switch — each till remembers the choice. */
+function LanguageSwitch() {
+  const { t, lang } = useT();
+  const setLang = useLangStore((s) => s.setLang);
+  return (
+    <div role="group" aria-label={t("shell.language")} className="flex items-center rounded-full bg-gray-100 p-0.5 text-[11px] font-bold">
+      {(["fr", "en"] as const).map((l) => (
+        <button
+          key={l}
+          onClick={() => setLang(l)}
+          aria-pressed={lang === l}
+          title={l === "fr" ? t("shell.switchToFrench") : t("shell.switchToEnglish")}
+          className={clsx(
+            "px-2 py-1 rounded-full uppercase transition-colors",
+            lang === l ? "bg-white text-gray-900 shadow-sm" : "text-gray-500 hover:text-gray-800"
+          )}
+        >
+          {l}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 function Logo() {
+  const { t } = useT();
   return (
     <div className="flex items-center gap-2.5">
       <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-brand-400 to-brand-600 flex items-center justify-center shadow-sm flex-shrink-0">
@@ -60,7 +86,7 @@ function Logo() {
       </div>
       <div className="min-w-0 leading-tight hidden lg:block">
         <p className="font-display font-bold text-white text-[15px] truncate">Riskyc Fashion</p>
-        <p className="text-[10px] font-semibold text-brand-400 tracking-wide uppercase">Point of Sale</p>
+        <p className="text-[10px] font-semibold text-brand-400 tracking-wide uppercase">{t("shell.pointOfSale")}</p>
       </div>
     </div>
   );
@@ -87,6 +113,7 @@ export default function PosShell({
   const logout = usePosAuthStore((s) => s.logout);
   const hasPermission = usePosAuthStore((s) => s.hasPermission);
   const online = useConnectivity();
+  const { t } = useT();
   useSessionRefresh(hasHydrated && !!session);
   const [profileOpen, setProfileOpen] = useState(false);
 
@@ -128,14 +155,14 @@ export default function PosShell({
               <Link
                 key={item.href}
                 href={item.href}
-                title={item.label}
+                title={t(item.labelKey)}
                 className={clsx(
                   "flex items-center justify-center lg:justify-start gap-2.5 px-3 py-2.5 rounded-xl text-sm font-semibold transition-colors",
                   active ? "bg-brand-500 text-white shadow-sm" : "text-gray-400 hover:bg-white/5 hover:text-white"
                 )}
               >
                 <Icon size={16} className="flex-shrink-0" />
-                <span className="hidden lg:inline">{item.label}</span>
+                <span className="hidden lg:inline">{t(item.labelKey)}</span>
               </Link>
             );
           })}
@@ -146,10 +173,10 @@ export default function PosShell({
               logout();
               router.replace("/login");
             }}
-            title="Log out"
+            title={t("shell.logOut")}
             className="w-full flex items-center justify-center lg:justify-start gap-2.5 px-3 py-2.5 rounded-xl text-sm font-semibold text-gray-400 hover:bg-red-500/10 hover:text-red-400 transition-colors"
           >
-            <LogOut size={16} className="flex-shrink-0" /> <span className="hidden lg:inline">Log out</span>
+            <LogOut size={16} className="flex-shrink-0" /> <span className="hidden lg:inline">{t("shell.logOut")}</span>
           </button>
         </div>
       </aside>
@@ -170,14 +197,14 @@ export default function PosShell({
                   }}
                   className="hidden md:flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1.5 rounded-full bg-amber-100 text-amber-800 hover:bg-amber-200"
                 >
-                  Back online — sign in again
+                  {t("shell.backOnlineSignIn")}
                 </button>
               ) : (
                 <span
-                  title="Signed in while the server was unreachable — the till works from its offline copy"
+                  title={t("shell.offlineSignInTitle")}
                   className="hidden md:flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1.5 rounded-full bg-amber-50 text-amber-700"
                 >
-                  Offline sign-in
+                  {t("shell.offlineSignIn")}
                 </span>
               ))}
             <OfflineSalesBadge />
@@ -188,8 +215,9 @@ export default function PosShell({
               )}
             >
               {online ? <Wifi size={12} /> : <WifiOff size={12} />}
-              {online ? "Online" : "Offline"}
+              {online ? t("shell.online") : t("shell.offline")}
             </span>
+            <LanguageSwitch />
             <div className="relative">
               <button
                 onClick={() => setProfileOpen((v) => !v)}
@@ -221,7 +249,7 @@ export default function PosShell({
                     }}
                     className="w-full flex items-center gap-2 px-3.5 py-2 text-xs font-semibold text-red-500 hover:bg-red-50"
                   >
-                    <LogOut size={13} /> Log out
+                    <LogOut size={13} /> {t("shell.logOut")}
                   </button>
                 </div>
               )}

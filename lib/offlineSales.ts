@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { API_BASE_URL, fetchWithTimeout } from "./apiClient";
 import { desktop, isDesktop } from "./desktop";
 import { useTillStore } from "./tillStore";
+import { t } from "./i18n";
 import { PosPaymentMethod, PosSale, Product } from "./types";
 
 /**
@@ -80,7 +81,7 @@ function persist(sales: QueuedSale[]): Promise<void> {
 /** The till's own database couldn't take the sale — the cashier must know it isn't recorded anywhere. */
 export class OfflineSaveError extends Error {
   constructor() {
-    super("The sale couldn't be saved on this till, so it is NOT recorded. Keep the basket and try again, or write the sale down.");
+    super(t("offline.saveFailed"));
     this.name = "OfflineSaveError";
   }
 }
@@ -166,8 +167,8 @@ export const useOfflineSalesStore = create<OfflineSalesState>()((set, get) => ({
           set({
             lastSyncError:
               res.status === 401
-                ? "This till is no longer linked to the shop (it was removed in the admin panel). The sales stay saved here; ask an admin to set the till up again."
-                : `The server refused the upload (${res.status}${body?.message ? `: ${body.message}` : ""}). The sales stay saved on this till and will be sent again.`,
+                ? t("offline.tillUnlinked")
+                : t("offline.uploadRefused", { status: res.status, detail: body?.message ? `: ${body.message}` : "" }),
           });
           return;
         }
@@ -179,15 +180,15 @@ export const useOfflineSalesStore = create<OfflineSalesState>()((set, get) => ({
           .map((s) => {
             const r = byId.get(s.clientSaleId);
             if (!r) return s;
-            if (r.status === "REJECTED") return { ...s, status: "REJECTED" as const, error: r.error ?? "Refused by the server." };
+            if (r.status === "REJECTED") return { ...s, status: "REJECTED" as const, error: r.error ?? t("offline.refused") };
             // ERROR or anything unknown: a temporary problem on the server — stays pending and is retried.
-            return { ...s, status: "PENDING" as const, error: r.error ?? "The server had a temporary problem." };
+            return { ...s, status: "PENDING" as const, error: r.error ?? t("offline.temporaryProblem") };
           });
         const movedToServer = results.some((r) => onServer(r));
         recorded += results.filter((r) => onServer(r)).length;
         set((state) => ({ sales, syncedVersion: movedToServer ? state.syncedVersion + 1 : state.syncedVersion }));
         if (results.some((r) => !onServer(r) && r.status !== "REJECTED")) {
-          set({ lastSyncError: "Some sales couldn't be recorded yet because of a server problem; they'll be retried." });
+          set({ lastSyncError: t("offline.someRetried") });
         }
         // If this write fails, the next start re-uploads the same sales; the server answers DUPLICATE for those.
         await persist(sales).catch(() => {});
@@ -195,8 +196,8 @@ export const useOfflineSalesStore = create<OfflineSalesState>()((set, get) => ({
     } catch {
       set({
         lastSyncError: useTillStore.getState().online
-          ? "The server didn't answer in time. The sales stay saved on this till and will be sent again automatically."
-          : "This till is offline. The sales are safe on this computer and will upload as soon as the connection is back.",
+          ? t("offline.noAnswer")
+          : t("offline.tillOffline"),
       });
     } finally {
       set({ syncing: false, lastSyncAt: Date.now(), lastSyncedCount: recorded });

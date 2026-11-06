@@ -7,6 +7,7 @@ import { usePosAuthStore } from "@/lib/authStore";
 import { listReconciliation, resolveReconciliation } from "@/lib/api/pos";
 import { PosReconciliationLine } from "@/lib/types";
 import PosShell from "@/components/PosShell";
+import { useT } from "@/lib/i18n";
 import Pagination from "@/components/Pagination";
 import { usePagination } from "@/lib/usePagination";
 
@@ -17,6 +18,7 @@ import { usePagination } from "@/lib/usePagination";
  */
 export default function ReconciliationPage() {
   const session = usePosAuthStore((s) => s.session);
+  const { t, locale } = useT();
   const hasHydrated = usePosAuthStore((s) => s.hasHydrated);
   const canManage = usePosAuthStore((s) => s.hasPermission("POS_RECONCILE"));
 
@@ -31,7 +33,7 @@ export default function ReconciliationPage() {
     if (!hasHydrated || !session) return;
     listReconciliation(session.token)
       .then(setLines)
-      .catch((e) => setError(e instanceof Error ? e.message : "Couldn't load the reconciliation list."))
+      .catch((e) => setError(e instanceof Error ? e.message : t("rec.loadFailed")))
       .finally(() => setLoading(false));
   }, [hasHydrated, session]);
 
@@ -39,11 +41,11 @@ export default function ReconciliationPage() {
   const resolved = lines.filter((l) => l.reconciled);
 
   const stats = [
-    { label: "Oversold sales", value: new Set(lines.map((l) => l.saleId)).size, icon: AlertTriangle, color: "text-orange-500 bg-orange-50" },
-    { label: "Lines affected", value: lines.length, icon: Package, color: "text-rose-500 bg-rose-50" },
-    { label: "Units short", value: lines.reduce((s, l) => s + l.oversoldBy, 0), icon: Layers, color: "text-purple-500 bg-purple-50" },
-    { label: "Resolved", value: resolved.length, icon: CheckCircle2, color: "text-green-500 bg-green-50" },
-    { label: "Pending", value: pending.length, icon: Clock, color: "text-amber-500 bg-amber-50" },
+    { label: t("rec.oversoldSales"), value: new Set(lines.map((l) => l.saleId)).size, icon: AlertTriangle, color: "text-orange-500 bg-orange-50" },
+    { label: t("rec.linesAffected"), value: lines.length, icon: Package, color: "text-rose-500 bg-rose-50" },
+    { label: t("rec.unitsShort"), value: lines.reduce((s, l) => s + l.oversoldBy, 0), icon: Layers, color: "text-purple-500 bg-purple-50" },
+    { label: t("rec.resolved"), value: resolved.length, icon: CheckCircle2, color: "text-green-500 bg-green-50" },
+    { label: t("rec.pending"), value: pending.length, icon: Clock, color: "text-amber-500 bg-amber-50" },
   ];
 
   const visible = tab === "pending" ? pending : resolved;
@@ -62,17 +64,17 @@ export default function ReconciliationPage() {
       const updated = await resolveReconciliation(session.token, line.itemId);
       setLines((prev) => prev.map((l) => (l.itemId === line.itemId ? updated : l)));
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Couldn't resolve that line.");
+      setError(e instanceof Error ? e.message : t("rec.resolveFailed"));
     } finally {
       setResolvingId(null);
     }
   };
 
   return (
-    <PosShell title="Reconciliation">
+    <PosShell title={t("nav.reconciliation")}>
       <div className="flex-1 overflow-y-auto">
         <div className="p-4 sm:p-6 lg:p-8 space-y-5">
-          <p className="text-sm text-gray-400 -mt-2">Sales that pushed a size/color's stock negative — likely sold here and online around the same time.</p>
+          <p className="text-sm text-gray-400 -mt-2">{t("rec.intro")}</p>
 
           {/* Stats */}
           <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
@@ -98,7 +100,7 @@ export default function ReconciliationPage() {
                 tab === "pending" ? "bg-brand-500 text-white shadow-sm" : "bg-white border border-gray-200 text-gray-600"
               )}
             >
-              Pending ({pending.length})
+              {t("rec.pendingTab", { n: pending.length })}
             </button>
             <button
               onClick={() => setTab("resolved")}
@@ -107,14 +109,14 @@ export default function ReconciliationPage() {
                 tab === "resolved" ? "bg-brand-500 text-white shadow-sm" : "bg-white border border-gray-200 text-gray-600"
               )}
             >
-              Resolved ({resolved.length})
+              {t("rec.resolvedTab", { n: resolved.length })}
             </button>
             <div className="relative flex-1 min-w-[200px]">
               <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
               <input
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search a product, sale # or cashier…"
+                placeholder={t("rec.search")}
                 className="w-full bg-white border border-gray-200 rounded-xl pl-9 pr-3 py-2 text-sm outline-none focus:border-brand-400"
               />
             </div>
@@ -130,7 +132,7 @@ export default function ReconciliationPage() {
           ) : filtered.length === 0 ? (
             <div className="text-center py-16">
               <CheckCircle2 size={28} className="mx-auto text-green-400 mb-2" />
-              <p className="text-gray-400 text-sm">{tab === "pending" ? "Nothing to reconcile." : "Nothing resolved yet."}</p>
+              <p className="text-gray-400 text-sm">{tab === "pending" ? t("rec.nothingPending") : t("rec.nothingResolved")}</p>
             </div>
           ) : (
             <>
@@ -138,25 +140,25 @@ export default function ReconciliationPage() {
               <table className="w-full min-w-[920px] border-collapse text-sm">
                 <thead>
                   <tr className="border-b border-gray-100 text-[11px] font-semibold uppercase tracking-wide text-gray-400">
-                    <th className="px-4 py-3 text-left">Sold</th>
-                    <th className="px-4 py-3 text-left">Sale #</th>
-                    <th className="px-4 py-3 text-left">Product</th>
-                    <th className="px-4 py-3 text-left">Color</th>
-                    <th className="px-4 py-3 text-left">Size</th>
-                    <th className="px-4 py-3 text-right">Qty sold</th>
-                    <th className="px-4 py-3 text-right">Stock before</th>
-                    <th className="px-4 py-3 text-right">Stock after</th>
-                    <th className="px-4 py-3 text-right">Short by</th>
-                    <th className="px-4 py-3 text-center">Actions</th>
+                    <th className="px-4 py-3 text-left">{t("rec.colSold")}</th>
+                    <th className="px-4 py-3 text-left">{t("col.saleNo")}</th>
+                    <th className="px-4 py-3 text-left">{t("col.product")}</th>
+                    <th className="px-4 py-3 text-left">{t("col.color")}</th>
+                    <th className="px-4 py-3 text-left">{t("col.size")}</th>
+                    <th className="px-4 py-3 text-right">{t("rec.colQtySold")}</th>
+                    <th className="px-4 py-3 text-right">{t("rec.colStockBefore")}</th>
+                    <th className="px-4 py-3 text-right">{t("rec.colStockAfter")}</th>
+                    <th className="px-4 py-3 text-right">{t("rec.colShortBy")}</th>
+                    <th className="px-4 py-3 text-center">{t("col.actions")}</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-50">
                   {pagination.pageItems.map((line) => (
                     <tr key={line.itemId} className="hover:bg-gray-50/60 transition-colors">
                       <td className="px-4 py-3 text-xs text-gray-500 whitespace-nowrap">
-                        {new Date(line.soldAt).toLocaleDateString("en-GB", { day: "2-digit", month: "short" })}
+                        {new Date(line.soldAt).toLocaleDateString(locale, { day: "2-digit", month: "short" })}
                         <br />
-                        {new Date(line.soldAt).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}
+                        {new Date(line.soldAt).toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit" })}
                       </td>
                       <td className="px-4 py-3 font-mono text-xs font-bold text-gray-700">{line.saleId.slice(0, 8)}…</td>
                       <td className="px-4 py-3">
@@ -180,7 +182,7 @@ export default function ReconciliationPage() {
                         <div className="flex items-center justify-center">
                           {line.reconciled ? (
                             <span title={line.reconciledByName ? `By ${line.reconciledByName}` : undefined} className="flex items-center gap-1 text-[11px] font-semibold text-green-600 bg-green-50 px-2.5 py-1.5 rounded-lg whitespace-nowrap">
-                              <Check size={11} /> {line.reconciledByName ?? "Resolved"}
+                              <Check size={11} /> {line.reconciledByName ?? t("rec.resolvedBy")}
                             </span>
                           ) : canManage ? (
                             <button
@@ -189,10 +191,10 @@ export default function ReconciliationPage() {
                               className="flex items-center gap-1 text-[11px] font-semibold text-white bg-gray-900 hover:bg-brand-600 px-2.5 py-1.5 rounded-lg disabled:opacity-50 whitespace-nowrap"
                             >
                               {resolvingId === line.itemId ? <Loader2 size={11} className="animate-spin" /> : <Check size={11} />}
-                              Resolve
+                              {t("rec.resolve")}
                             </button>
                           ) : (
-                            <span className="text-[11px] font-semibold text-amber-600 bg-amber-50 px-2.5 py-1.5 rounded-lg">Pending</span>
+                            <span className="text-[11px] font-semibold text-amber-600 bg-amber-50 px-2.5 py-1.5 rounded-lg">{t("rec.pendingTag")}</span>
                           )}
                         </div>
                       </td>
@@ -206,7 +208,7 @@ export default function ReconciliationPage() {
               totalPages={pagination.totalPages}
               total={pagination.total}
               pageSize={pagination.pageSize}
-              noun="lines"
+              noun={t("noun.lines")}
               onPageChange={pagination.setPage}
             />
             </>

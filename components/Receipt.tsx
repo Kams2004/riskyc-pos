@@ -1,4 +1,5 @@
 import { PosPaymentMethod, PosSettings } from "@/lib/types";
+import { TKey, useT } from "@/lib/i18n";
 
 export interface ReceiptItem {
   productName: string;
@@ -19,10 +20,10 @@ export interface ReceiptData {
   discount?: number;
 }
 
-const PAYMENT_LABELS: Record<PosPaymentMethod, string> = {
-  CASH: "Cash",
-  ORANGE_MONEY: "Orange Money",
-  MOBILE_MONEY: "MTN MoMo",
+const PAYMENT_LABEL_KEYS: Record<PosPaymentMethod, TKey> = {
+  CASH: "pay.cash",
+  ORANGE_MONEY: "pay.orangeMoney",
+  MOBILE_MONEY: "pay.mtnMomo",
 };
 
 function formatPrice(n: number) {
@@ -39,6 +40,7 @@ const WIDTH_MM: Record<PosSettings["paperWidth"], number> = { MM58: 58, MM80: 80
  * interactive controls, nothing that depends on screen-only CSS.
  */
 export default function Receipt({ settings, data }: { settings: PosSettings; data: ReceiptData }) {
+  const { t, locale } = useT();
   const widthMm = WIDTH_MM[settings.paperWidth];
   const small = settings.paperWidth === "MM58";
 
@@ -61,9 +63,9 @@ export default function Receipt({ settings, data }: { settings: PosSettings; dat
 
       <div className="border-t border-dashed border-black my-1.5" />
 
-      <p>{new Date(data.soldAt).toLocaleString()}</p>
-      {settings.showSaleId && <p>Sale #{data.saleRef}</p>}
-      {settings.showCashierName && <p>Served by {data.cashierName}</p>}
+      <p>{new Date(data.soldAt).toLocaleString(locale)}</p>
+      {settings.showSaleId && <p>{t("receipt.saleNo", { ref: data.saleRef })}</p>}
+      {settings.showCashierName && <p>{t("receipt.servedBy", { name: data.cashierName })}</p>}
 
       <div className="border-t border-dashed border-black my-1.5" />
 
@@ -88,22 +90,22 @@ export default function Receipt({ settings, data }: { settings: PosSettings; dat
       {!!data.discount && data.discount > 0 && (
         <>
           <div className="flex justify-between">
-            <span>Subtotal</span>
+            <span>{t("receipt.subtotal")}</span>
             <span className="tabular-nums">{formatPrice(data.total + data.discount)}</span>
           </div>
           <div className="flex justify-between">
-            <span>Bulk discount</span>
+            <span>{t("receipt.bulkDiscount")}</span>
             <span className="tabular-nums">-{formatPrice(data.discount)}</span>
           </div>
         </>
       )}
       <div className="flex justify-between font-bold" style={{ fontSize: small ? "12px" : "14px" }}>
-        <span>TOTAL</span>
+        <span>{t("receipt.total")}</span>
         <span className="tabular-nums">{formatPrice(data.total)}</span>
       </div>
       <div className="flex justify-between mt-0.5">
-        <span>Payment</span>
-        <span>{PAYMENT_LABELS[data.paymentMethod]}</span>
+        <span>{t("receipt.payment")}</span>
+        <span>{t(PAYMENT_LABEL_KEYS[data.paymentMethod])}</span>
       </div>
 
       {settings.footerMessage && (

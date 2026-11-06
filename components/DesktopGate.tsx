@@ -9,6 +9,7 @@ import { usePosAuthStore } from "@/lib/authStore";
 import { useOfflineSalesStore } from "@/lib/offlineSales";
 import { loadSavedPhotos, syncPhotoCache } from "@/lib/photoCache";
 import { PosCatalog } from "@/lib/types";
+import { t as tStatic, useT } from "@/lib/i18n";
 
 const HEARTBEAT_MS = 15_000;
 const CATALOG_SYNC_MS = 60_000;
@@ -112,8 +113,9 @@ function useTillSync(device: TillDevice | null, onRevoked: () => void) {
 }
 
 function EnrollScreen({ notice, onEnrolled }: { notice: string; onEnrolled: (device: TillDevice) => void }) {
+  const { t } = useT();
   const [code, setCode] = useState("");
-  const [name, setName] = useState("Caisse 1");
+  const [name, setName] = useState(() => tStatic("enroll.defaultName"));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
@@ -131,7 +133,7 @@ function EnrollScreen({ notice, onEnrolled }: { notice: string; onEnrolled: (dev
       });
       const body = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setError(body.message || "That code didn't work. Ask an admin for a new one.");
+        setError(body.message || t("enroll.badCode"));
         return;
       }
       const device: TillDevice = {
@@ -145,7 +147,7 @@ function EnrollScreen({ notice, onEnrolled }: { notice: string; onEnrolled: (dev
       await desktop.saveDevice(device);
       onEnrolled(device);
     } catch {
-      setError("Can't reach the server. Setting up a till needs an internet connection once.");
+      setError(t("enroll.needsInternet"));
     } finally {
       setBusy(false);
     }
@@ -164,18 +166,14 @@ function EnrollScreen({ notice, onEnrolled }: { notice: string; onEnrolled: (dev
             <MonitorSmartphone size={22} />
           </div>
           <div>
-            <h1 className="text-xl font-bold text-gray-900">Set up this till</h1>
-            <p className="text-xs text-gray-500">Riskyc POS · one time only</p>
+            <h1 className="text-xl font-bold text-gray-900">{t("enroll.title")}</h1>
+            <p className="text-xs text-gray-500">{t("enroll.oneTime")}</p>
           </div>
         </div>
         {notice && <div className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-xl px-3.5 py-2.5">{notice}</div>}
-        <p className="text-sm text-gray-600 leading-relaxed">
-          An admin creates a code in the admin panel:{" "}
-          <span className="font-semibold text-gray-900">Point de Vente → Settings → Add a till</span>. Enter it below to link this
-          computer to the shop.
-        </p>
+        <p className="text-sm text-gray-600 leading-relaxed">{t("enroll.howTo")}</p>
         <div>
-          <label className="block text-xs font-semibold text-gray-900 mb-1.5">Setup code</label>
+          <label className="block text-xs font-semibold text-gray-900 mb-1.5">{t("enroll.code")}</label>
           <input
             value={code}
             onChange={(e) => setCode(e.target.value.toUpperCase())}
@@ -186,7 +184,7 @@ function EnrollScreen({ notice, onEnrolled }: { notice: string; onEnrolled: (dev
           />
         </div>
         <div>
-          <label className="block text-xs font-semibold text-gray-900 mb-1.5">Name for this till</label>
+          <label className="block text-xs font-semibold text-gray-900 mb-1.5">{t("enroll.name")}</label>
           <input
             value={name}
             onChange={(e) => setName(e.target.value)}
@@ -201,7 +199,7 @@ function EnrollScreen({ notice, onEnrolled }: { notice: string; onEnrolled: (dev
           disabled={busy}
           className="w-full flex items-center justify-center gap-2 bg-brand-500 hover:bg-brand-600 text-white font-semibold rounded-xl py-3 disabled:opacity-60"
         >
-          {busy && <Loader2 size={16} className="animate-spin" />} Set up till
+          {busy && <Loader2 size={16} className="animate-spin" />} {t("enroll.submit")}
         </button>
       </form>
     </div>
@@ -237,7 +235,7 @@ export default function DesktopGate({ children }: { children: React.ReactNode })
     await desktop.resetTill().catch(() => {});
     logout();
     setDevice(null);
-    setNotice("This till was removed by an admin. Enter a new code to set it up again.");
+    setNotice(tStatic("enroll.removedNotice"));
     setPhase("enroll");
   });
 

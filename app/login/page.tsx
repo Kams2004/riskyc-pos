@@ -6,6 +6,7 @@ import Image from "next/image";
 import { User, Lock, Eye, EyeOff, Loader2, CreditCard, Store, Printer } from "lucide-react";
 import clsx from "clsx";
 import { usePosAuthStore } from "@/lib/authStore";
+import { useLangStore, useT } from "@/lib/i18n";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -15,6 +16,8 @@ export default function LoginPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const { t, lang } = useT();
+  const setLang = useLangStore((s) => s.setLang);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -51,16 +54,31 @@ export default function LoginPage() {
           </div>
           <h1 className="font-display text-2xl font-bold text-white">Riskyc Fashion</h1>
           <span className="mt-2.5 flex items-center gap-1.5 text-[11px] font-bold text-white bg-gradient-to-r from-brand-500 to-brand-700 px-3 py-1 rounded-full uppercase tracking-wide shadow-sm">
-            <CreditCard size={11} /> Point of Sale
+            <CreditCard size={11} /> {t("login.pointOfSale")}
           </span>
         </div>
 
-        <p className="text-center text-gray-300 text-sm font-medium mb-5">Cashier Sign-In</p>
+        <div className="flex items-center justify-center gap-3 mb-5">
+          <p className="text-gray-300 text-sm font-medium">{t("login.title")}</p>
+          <div className="flex items-center rounded-full bg-white/10 p-0.5 text-[11px] font-bold">
+            {(["fr", "en"] as const).map((l) => (
+              <button
+                key={l}
+                type="button"
+                onClick={() => setLang(l)}
+                aria-pressed={lang === l}
+                className={clsx("px-2 py-0.5 rounded-full uppercase", lang === l ? "bg-white text-gray-900" : "text-gray-300 hover:text-white")}
+              >
+                {l}
+              </button>
+            ))}
+          </div>
+        </div>
 
         {/* Card */}
         <form onSubmit={handleSubmit} className="bg-white rounded-2xl shadow-2xl p-6 space-y-4">
           <div>
-            <label className="block text-xs font-semibold text-gray-500 mb-1.5">Username or email</label>
+            <label className="block text-xs font-semibold text-gray-500 mb-1.5">{t("login.username")}</label>
             <div className="relative">
               <User size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400" />
               <input
@@ -75,7 +93,7 @@ export default function LoginPage() {
             </div>
           </div>
           <div>
-            <label className="block text-xs font-semibold text-gray-500 mb-1.5">Password</label>
+            <label className="block text-xs font-semibold text-gray-500 mb-1.5">{t("login.password")}</label>
             <div className="relative">
               <Lock size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400" />
               <input
@@ -108,7 +126,7 @@ export default function LoginPage() {
             )}
           >
             {loading ? <Loader2 size={16} className="animate-spin" /> : null}
-            {loading ? "Signing in…" : "Sign in →"}
+            {loading ? t("login.signingIn") : t("login.signIn")}
           </button>
         </form>
 
@@ -118,9 +136,9 @@ export default function LoginPage() {
             <Store size={16} className="text-brand-300" />
           </div>
           <div className="min-w-0">
-            <p className="text-sm font-semibold text-white leading-tight">In-store register</p>
+            <p className="text-sm font-semibold text-white leading-tight">{t("login.registerTitle")}</p>
             <p className="text-[11px] text-gray-300 flex items-center gap-1 mt-0.5">
-              <Printer size={10} /> Direct sales · Printed tickets · Sales history
+              <Printer size={10} /> {t("login.registerFeatures")}
             </p>
           </div>
         </div>

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Download, Loader2 } from "lucide-react";
+import { useT } from "@/lib/i18n";
 
 type ReadyUpdate = { version: string; install: () => Promise<void> };
 
@@ -14,6 +15,7 @@ const CHECK_EVERY_MS = 6 * 60 * 60 * 1000;
 export default function DesktopUpdater() {
   const [ready, setReady] = useState<ReadyUpdate | null>(null);
   const [installing, setInstalling] = useState(false);
+  const { t } = useT();
 
   useEffect(() => {
     if (typeof window === "undefined" || !("__TAURI_INTERNALS__" in window)) return;
@@ -53,16 +55,14 @@ export default function DesktopUpdater() {
   return (
     <div className="fixed bottom-4 right-4 z-50 flex items-center gap-3 bg-gray-900 text-white rounded-2xl shadow-2xl pl-4 pr-2 py-2">
       <Download size={16} className="text-brand-300 flex-shrink-0" />
-      <p className="text-sm">
-        Version <span className="font-semibold">{ready.version}</span> is ready.
-      </p>
+      <p className="text-sm">{t("updater.ready", { version: ready.version })}</p>
       <button
         onClick={restart}
         disabled={installing}
         className="flex items-center gap-1.5 bg-brand-500 hover:bg-brand-600 text-white text-xs font-semibold rounded-xl px-3 py-2 disabled:opacity-60"
       >
         {installing && <Loader2 size={13} className="animate-spin" />}
-        {installing ? "Updating…" : "Restart to update"}
+        {installing ? t("updater.updating") : t("updater.restart")}
       </button>
     </div>
   );

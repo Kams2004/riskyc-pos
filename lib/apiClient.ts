@@ -1,5 +1,7 @@
 /** Thin fetch wrapper for the Riskyc Fashion Spring Boot backend — same shape as the web app's own lib/apiClient.ts, so porting logic between the two stays mechanical. */
 
+import { t } from "./i18n";
+
 export const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8080";
 
 /** The main Riskyc Fashion admin app — cashier/role management lives there, not here (see the Utilisateurs & Accès section of app/settings). */
@@ -22,7 +24,7 @@ interface ApiFetchOptions extends RequestInit {
 
 /** The server couldn't be reached at all (no connection, timed out) — as opposed to an ApiError, where it answered. */
 export class NetworkError extends Error {
-  constructor(message = "Can't reach the server right now.") {
+  constructor(message = t("err.network")) {
     super(message);
     this.name = "NetworkError";
   }
@@ -44,7 +46,7 @@ async function setReachable(reachable: boolean) {
 export async function fetchWithTimeout(url: string, init: RequestInit = {}, timeoutMs = DEFAULT_TIMEOUT_MS): Promise<Response> {
   if (typeof navigator !== "undefined" && navigator.onLine === false) {
     await setReachable(false);
-    throw new NetworkError("This computer is offline.");
+    throw new NetworkError(t("err.computerOffline"));
   }
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -88,7 +90,7 @@ export async function apiFetch<T>(path: string, options: ApiFetchOptions = {}): 
   );
 
   if (!res.ok) {
-    let message = "Something went wrong. Please try again.";
+    let message = t("err.generic");
     try {
       const body = await res.json();
       message = body.message || message;

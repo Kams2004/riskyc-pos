@@ -28,13 +28,14 @@ import PrintArea from "@/components/PrintArea";
 import { ReceiptData } from "@/components/Receipt";
 import PosShell from "@/components/PosShell";
 import Pagination from "@/components/Pagination";
+import { TKey, t as tStatic, useT } from "@/lib/i18n";
 
 const PAGE_SIZE = 10;
 
-const PAYMENT_LABELS: Record<PosPaymentMethod, string> = {
-  CASH: "Cash",
-  ORANGE_MONEY: "Orange Money",
-  MOBILE_MONEY: "MTN MoMo",
+const PAYMENT_LABEL_KEYS: Record<PosPaymentMethod, TKey> = {
+  CASH: "pay.cash",
+  ORANGE_MONEY: "pay.orangeMoney",
+  MOBILE_MONEY: "pay.mtnMomo",
 };
 
 function formatPrice(n: number) {
@@ -111,7 +112,7 @@ function fromOnlineOrder(o: OnlineOrder): SaleRow {
     ref: o.id.slice(0, 8).toUpperCase(),
     channel: "ONLINE",
     soldAt: o.packagingCompletedAt ?? o.createdAt,
-    person: customer || "Online customer",
+    person: customer || tStatic("sales.onlineCustomer"),
     items: o.items.map((i) => ({
       id: i.id,
       productId: i.productId,
@@ -132,6 +133,7 @@ export default function SalesHistoryPage() {
   const session = usePosAuthStore((s) => s.session);
   const hasHydrated = usePosAuthStore((s) => s.hasHydrated);
   const canVoid = usePosAuthStore((s) => s.hasPermission("VOID_POS_SALE"));
+  const { t, lang, locale } = useT();
 
   const [sales, setSales] = useState<PosSale[]>([]);
   const [onlineSales, setOnlineSales] = useState<OnlineOrder[]>([]);
@@ -168,7 +170,7 @@ export default function SalesHistoryPage() {
         setError(
           e instanceof ApiError
             ? e.message
-            : "Can't reach the server, so only the sales saved on this till are shown. The full history comes back when the connection does."
+            : t("sales.offlineOnly")
         )
       )
       .finally(() => setLoading(false));
@@ -186,7 +188,9 @@ export default function SalesHistoryPage() {
       // Once uploaded a sale comes back from the server; skip its queued copy if both are briefly present.
       ...queuedSales.filter((q) => !onServer.has(q.clientSaleId)).map(fromQueuedSale),
     ];
-  }, [sales, onlineSales, queuedSales]);
+    // lang: the "Online customer" fallback name follows the language.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sales, onlineSales, queuedSales, lang]);
   // Cashiers from server sales and from sales still waiting on this till (e.g. someone who only sold offline today).
   const cashiers = useMemo(
     () => Array.from(new Set([...sales.map((s) => s.cashierName), ...queuedSales.map((q) => q.cashierName)])).sort(),
@@ -201,10 +205,10 @@ export default function SalesHistoryPage() {
   const last30Sales = rows.filter((s) => !s.voided && new Date(s.soldAt) >= last30);
 
   const stats = [
-    { label: "Sales today", value: String(todaySales.length), icon: ShoppingBag, color: "text-brand-500 bg-brand-50" },
-    { label: "Revenue today", value: formatPrice(todaySales.reduce((s, x) => s + x.total, 0)), icon: Wallet, color: "text-purple-500 bg-purple-50" },
-    { label: "Sales (30 days)", value: String(last30Sales.length), icon: CalendarDays, color: "text-blue-500 bg-blue-50" },
-    { label: "Revenue (30 days)", value: formatPrice(last30Sales.reduce((s, x) => s + x.total, 0)), icon: TrendingUp, color: "text-green-500 bg-green-50" },
+    { label: t("sales.today"), value: String(todaySales.length), icon: ShoppingBag, color: "text-brand-500 bg-brand-50" },
+    { label: t("sales.revenueToday"), value: formatPrice(todaySales.reduce((s, x) => s + x.total, 0)), icon: Wallet, color: "text-purple-500 bg-purple-50" },
+    { label: t("sales.30days"), value: String(last30Sales.length), icon: CalendarDays, color: "text-blue-500 bg-blue-50" },
+    { label: t("sales.revenue30"), value: formatPrice(last30Sales.reduce((s, x) => s + x.total, 0)), icon: TrendingUp, color: "text-green-500 bg-green-50" },
   ];
 
   const resetFilters = () => {
@@ -250,13 +254,13 @@ export default function SalesHistoryPage() {
 
   const handleVoid = async (sale: PosSale) => {
     if (!session) return;
-    if (!window.confirm("Void this sale? This restores the stock for every item on it. This cannot be undone.")) return;
+    if (!window.confirm(t("sales.voidConfirm"))) return;
     setVoidingId(sale.id);
     try {
       const updated = await voidSale(session.token, sale.id);
       setSales((prev) => prev.map((s) => (s.id === sale.id ? updated : s)));
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Couldn't void that sale.");
+      setError(e instanceof Error ? e.message : t("sales.voidFailed"));
     } finally {
       setVoidingId(null);
     }
@@ -283,16 +287,16 @@ export default function SalesHistoryPage() {
   };
 
   const exportCsv = () => {
-    const header = ["Sale #", "Channel", "Date", "Cashier / Customer", "Items", "Amount", "Payment", "Status"];
+    const header = [t("col.saleNo"), t("sales.colChannel"), t("sales.colDate"), t("sales.colPerson"), t("orders.colItems"), t("orders.colAmount"), t("orders.colPayment"), t("orders.colStatus")];
     const csvRows = filtered.map((s) => [
       s.ref,
-      s.channel === "ONLINE" ? "Online" : "In store",
-      new Date(s.soldAt).toLocaleString(),
+      s.channel === "ONLINE" ? t("sales.online") : t("sales.inStore"),
+      new Date(s.soldAt).toLocaleString(locale),
       s.person,
       String(s.items.reduce((n, i) => n + i.quantity, 0)),
       String(Math.round(s.total)),
-      PAYMENT_LABELS[s.paymentMethod],
-      s.queued ? (s.queued.status === "REJECTED" ? "Not accepted" : "Pending sync") : s.voided ? "Voided" : "Completed",
+      t(PAYMENT_LABEL_KEYS[s.paymentMethod]),
+      s.queued ? (s.queued.status === "REJECTED" ? t("sales.notAccepted") : t("sales.pendingSync")) : s.voided ? t("sales.voided") : t("sales.completed"),
     ]);
     const csv = [header, ...csvRows].map((r) => r.map((c) => `"${c.replace(/"/g, '""')}"`).join(",")).join("\n");
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
@@ -306,10 +310,10 @@ export default function SalesHistoryPage() {
 
   return (
     <>
-      <PosShell title="Sales History">
+      <PosShell title={t("sales.title")}>
         <div className="flex-1 overflow-y-auto">
           <div className="p-4 sm:p-6 lg:p-8 space-y-5">
-            <p className="text-sm text-gray-400 -mt-2">View, search and manage every sale rung up at this till.</p>
+            <p className="text-sm text-gray-400 -mt-2">{t("sales.intro")}</p>
 
             {/* Stats */}
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
@@ -334,7 +338,7 @@ export default function SalesHistoryPage() {
                   <input
                     value={search}
                     onChange={(e) => handleFilterChange(setSearch)(e.target.value)}
-                    placeholder="Search a sale (sale #, product, cashier…)"
+                    placeholder={t("sales.search")}
                     className="w-full bg-gray-100 border border-gray-200 rounded-xl pl-9 pr-3 py-2 text-sm outline-none focus:border-brand-400 focus:bg-white"
                   />
                 </div>
@@ -342,7 +346,7 @@ export default function SalesHistoryPage() {
                   onClick={exportCsv}
                   className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold text-gray-600 border border-gray-300 hover:bg-gray-100"
                 >
-                  <Download size={13} /> Export
+                  <Download size={13} /> {t("sales.export")}
                 </button>
               </div>
 
@@ -352,26 +356,26 @@ export default function SalesHistoryPage() {
                   onChange={(e) => handleFilterChange(setStatusFilter)(e.target.value as typeof statusFilter)}
                   className="text-xs font-medium bg-gray-100 border border-gray-200 rounded-xl px-2.5 py-2 outline-none"
                 >
-                  <option value="all">All statuses</option>
-                  <option value="completed">Completed</option>
-                  <option value="voided">Voided</option>
+                  <option value="all">{t("sales.allStatuses")}</option>
+                  <option value="completed">{t("sales.completed")}</option>
+                  <option value="voided">{t("sales.voided")}</option>
                 </select>
                 <select
                   value={channelFilter}
                   onChange={(e) => handleFilterChange(setChannelFilter)(e.target.value as typeof channelFilter)}
                   className="text-xs font-medium bg-gray-100 border border-gray-200 rounded-xl px-2.5 py-2 outline-none"
                 >
-                  <option value="all">In store &amp; online</option>
-                  <option value="STORE">In store</option>
-                  <option value="ONLINE">Online</option>
+                  <option value="all">{t("sales.allChannels")}</option>
+                  <option value="STORE">{t("sales.inStore")}</option>
+                  <option value="ONLINE">{t("sales.online")}</option>
                 </select>
                 <select
                   value={paymentFilter}
                   onChange={(e) => handleFilterChange(setPaymentFilter)(e.target.value as typeof paymentFilter)}
                   className="text-xs font-medium bg-gray-100 border border-gray-200 rounded-xl px-2.5 py-2 outline-none"
                 >
-                  <option value="all">All payments</option>
-                  <option value="CASH">Cash</option>
+                  <option value="all">{t("sales.allPayments")}</option>
+                  <option value="CASH">{t("pay.cash")}</option>
                   <option value="ORANGE_MONEY">Orange Money</option>
                   <option value="MOBILE_MONEY">MTN MoMo</option>
                 </select>
@@ -380,7 +384,7 @@ export default function SalesHistoryPage() {
                   onChange={(e) => handleFilterChange(setCashierFilter)(e.target.value)}
                   className="text-xs font-medium bg-gray-100 border border-gray-200 rounded-xl px-2.5 py-2 outline-none"
                 >
-                  <option value="all">All cashiers</option>
+                  <option value="all">{t("sales.allCashiers")}</option>
                   {cashiers.map((c) => (
                     <option key={c} value={c}>
                       {c}
@@ -406,7 +410,7 @@ export default function SalesHistoryPage() {
                   onClick={resetFilters}
                   className="flex items-center gap-1.5 px-2.5 py-2 rounded-xl text-xs font-semibold text-gray-500 hover:bg-gray-100"
                 >
-                  <RotateCcw size={12} /> Reset
+                  <RotateCcw size={12} /> {t("sales.reset")}
                 </button>
               </div>
             </div>
@@ -423,21 +427,21 @@ export default function SalesHistoryPage() {
             ) : error && rows.length === 0 ? (
               <div className="text-sm text-red-600 bg-red-50 rounded-xl px-4 py-3">{error}</div>
             ) : filtered.length === 0 ? (
-              <p className="text-center text-gray-400 py-16 text-sm">No sales match these filters.</p>
+              <p className="text-center text-gray-400 py-16 text-sm">{t("sales.noMatch")}</p>
             ) : (
               <>
                 <div className="bg-white border border-gray-200 shadow-sm rounded-2xl overflow-hidden overflow-x-auto">
                   <table className="w-full min-w-[820px] border-collapse text-sm">
                     <thead>
                       <tr className="bg-gray-50 border-b border-gray-200 text-[11px] font-semibold uppercase tracking-wide text-gray-500">
-                        <th className="px-4 py-3 text-left">Sale #</th>
-                        <th className="px-4 py-3 text-left">Date &amp; Time</th>
-                        <th className="px-4 py-3 text-left">Cashier / Customer</th>
-                        <th className="px-4 py-3 text-left">Items</th>
-                        <th className="px-4 py-3 text-left">Amount</th>
-                        <th className="px-4 py-3 text-left">Payment</th>
-                        <th className="px-4 py-3 text-left">Status</th>
-                        <th className="px-4 py-3 text-center">Actions</th>
+                        <th className="px-4 py-3 text-left">{t("col.saleNo")}</th>
+                        <th className="px-4 py-3 text-left">{t("sales.colDateTime")}</th>
+                        <th className="px-4 py-3 text-left">{t("sales.colPerson")}</th>
+                        <th className="px-4 py-3 text-left">{t("orders.colItems")}</th>
+                        <th className="px-4 py-3 text-left">{t("orders.colAmount")}</th>
+                        <th className="px-4 py-3 text-left">{t("orders.colPayment")}</th>
+                        <th className="px-4 py-3 text-left">{t("orders.colStatus")}</th>
+                        <th className="px-4 py-3 text-center">{t("col.actions")}</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-200">
@@ -455,13 +459,13 @@ export default function SalesHistoryPage() {
                                     sale.channel === "ONLINE" ? "bg-blue-50 text-blue-600" : "bg-gray-100 text-gray-500"
                                   )}
                                 >
-                                  {sale.channel === "ONLINE" ? "Online" : "In store"}
+                                  {sale.channel === "ONLINE" ? t("sales.online") : t("sales.inStore")}
                                 </span>
                               </td>
                               <td className="px-4 py-3 text-xs text-gray-500">
-                                {new Date(sale.soldAt).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })}
+                                {new Date(sale.soldAt).toLocaleDateString(locale, { day: "2-digit", month: "short", year: "numeric" })}
                                 <br />
-                                {new Date(sale.soldAt).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}
+                                {new Date(sale.soldAt).toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit" })}
                               </td>
                               <td className="px-4 py-3">
                                 <div className="flex items-center gap-2">
@@ -471,31 +475,31 @@ export default function SalesHistoryPage() {
                                   <span className="text-xs text-gray-700">{sale.person}</span>
                                 </div>
                               </td>
-                              <td className="px-4 py-3 text-xs text-gray-500">{totalQty} item{totalQty !== 1 ? "s" : ""}</td>
+                              <td className="px-4 py-3 text-xs text-gray-500">{t(totalQty === 1 ? "items.one" : "items.other", { n: totalQty })}</td>
                               <td className="px-4 py-3 text-sm font-bold tabular-nums text-gray-900">{formatPrice(sale.total)}</td>
                               <td className="px-4 py-3">
                                 <span className="inline-flex text-[11px] font-medium px-2 py-1 rounded-lg bg-gray-100 text-gray-600 whitespace-nowrap">
-                                  {PAYMENT_LABELS[sale.paymentMethod]}
+                                  {t(PAYMENT_LABEL_KEYS[sale.paymentMethod])}
                                 </span>
                               </td>
                               <td className="px-4 py-3">
                                 {sale.queued ? (
                                   sale.queued.status === "REJECTED" ? (
                                     <span title={sale.queued.error} className="text-[11px] font-bold px-2 py-1 rounded-full bg-red-50 text-red-600">
-                                      Not accepted
+                                      {t("sales.notAccepted")}
                                     </span>
                                   ) : (
-                                    <span title="Saved on this till while offline — uploads by itself" className="text-[11px] font-bold px-2 py-1 rounded-full bg-amber-50 text-amber-700">
-                                      Pending sync
+                                    <span title={t("sales.pendingSyncTitle")} className="text-[11px] font-bold px-2 py-1 rounded-full bg-amber-50 text-amber-700">
+                                      {t("sales.pendingSync")}
                                     </span>
                                   )
                                 ) : sale.voided ? (
-                                  <span className="text-[11px] font-bold px-2 py-1 rounded-full bg-gray-100 text-gray-500">Voided</span>
+                                  <span className="text-[11px] font-bold px-2 py-1 rounded-full bg-gray-100 text-gray-500">{t("sales.voided")}</span>
                                 ) : (
-                                  <span className="text-[11px] font-bold px-2 py-1 rounded-full bg-green-50 text-green-600">Completed</span>
+                                  <span className="text-[11px] font-bold px-2 py-1 rounded-full bg-green-50 text-green-600">{t("sales.completed")}</span>
                                 )}
                                 {sale.pos?.stockReconciliationFlag && !sale.voided && (
-                                  <span title="This sale pushed stock negative" className="ml-1 inline-flex items-center gap-1 text-[10px] font-bold text-orange-600 bg-orange-50 px-1.5 py-0.5 rounded-full">
+                                  <span title={t("sales.negativeStock")} className="ml-1 inline-flex items-center gap-1 text-[10px] font-bold text-orange-600 bg-orange-50 px-1.5 py-0.5 rounded-full">
                                     <AlertTriangle size={9} />
                                   </span>
                                 )}
@@ -504,13 +508,13 @@ export default function SalesHistoryPage() {
                                 <div className="flex items-center justify-center gap-1">
                                   <button
                                     onClick={() => setExpandedId(expanded ? null : sale.id)}
-                                    title="View items"
+                                    title={t("sales.viewItems")}
                                     className="p-1.5 rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-600"
                                   >
                                     {expanded ? <ChevronUp size={14} /> : <Eye size={14} />}
                                   </button>
                                   {!sale.voided && (
-                                    <button onClick={() => printSale(sale)} title="Reprint" className="p-1.5 rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-600">
+                                    <button onClick={() => printSale(sale)} title={t("sales.reprint")} className="p-1.5 rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-600">
                                       <Printer size={14} />
                                     </button>
                                   )}
@@ -518,7 +522,7 @@ export default function SalesHistoryPage() {
                                     <button
                                       onClick={() => handleVoid(sale.pos!)}
                                       disabled={voidingId === sale.id}
-                                      title="Void sale"
+                                      title={t("sales.void")}
                                       className="p-1.5 rounded-lg text-gray-400 hover:bg-red-50 hover:text-red-500 disabled:opacity-50"
                                     >
                                       {voidingId === sale.id ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
@@ -544,13 +548,15 @@ export default function SalesHistoryPage() {
                                     ))}
                                     {sale.pos?.voided && sale.pos.voidedByName && (
                                       <p className="text-[11px] text-gray-400 pt-1">
-                                        Voided by {sale.pos.voidedByName}
-                                        {sale.pos.voidedAt ? ` · ${new Date(sale.pos.voidedAt).toLocaleString()}` : ""}
+                                        {t("sales.voidedBy", { name: sale.pos.voidedByName })}
+                                        {sale.pos.voidedAt ? ` · ${new Date(sale.pos.voidedAt).toLocaleString(locale)}` : ""}
                                       </p>
                                     )}
                                     {sale.online && (
                                       <p className="text-[11px] text-gray-400 pt-1">
-                                        Online order · packed{sale.online.packagingCompletedByName ? ` by ${sale.online.packagingCompletedByName}` : ""}
+                                        {sale.online.packagingCompletedByName
+                                          ? t("sales.onlinePackedBy", { name: sale.online.packagingCompletedByName })
+                                          : t("sales.onlinePacked")}
                                         {sale.online.customerInfo?.phone ? ` · ${sale.online.customerInfo.phone}` : ""}
                                       </p>
                                     )}
@@ -571,7 +577,7 @@ export default function SalesHistoryPage() {
                   totalPages={totalPages}
                   total={filtered.length}
                   pageSize={PAGE_SIZE}
-                  noun="sales"
+                  noun={t("noun.sales")}
                   onPageChange={setPage}
                 />
               </>

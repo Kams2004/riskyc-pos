@@ -1,6 +1,7 @@
 import { apiFetch, API_BASE_URL, handleUnauthorized } from "@/lib/apiClient";
 import { Category, MediaItem, Product, ProductColor } from "@/lib/types";
 import { withOfflineCopy } from "@/lib/api/pos";
+import { t } from "@/lib/i18n";
 
 /** Mirrors the main admin's lib/api/products.ts — same backend endpoints, same per-section permissions. */
 
@@ -56,7 +57,7 @@ export async function uploadProductMedia(productId: string, file: File, token: s
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
     await handleUnauthorized(res.status, true);
-    throw new Error(body.message || "Couldn't upload the image");
+    throw new Error(body.message || t("err.imageUpload"));
   }
   return res.json();
 }
