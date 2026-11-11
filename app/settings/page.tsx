@@ -13,6 +13,7 @@ import ToggleSwitch from "@/components/ToggleSwitch";
 import Receipt, { ReceiptData } from "@/components/Receipt";
 import PrintArea from "@/components/PrintArea";
 import TillsCard from "@/components/TillsCard";
+import AppUpdateCard from "@/components/AppUpdateCard";
 import { TKey, useT } from "@/lib/i18n";
 
 const PAPER_WIDTHS: { value: ReceiptPaperWidth; label: TKey }[] = [
@@ -354,6 +355,8 @@ export default function SettingsPage() {
                   </SectionCard>
 
                 </div>
+
+                <AppUpdateCard />
 
                 <TillsCard />
 
