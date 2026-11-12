@@ -12,7 +12,8 @@ import { PosPaymentMethod, PosSale, Product } from "./types";
  * and reconciliation rules). Re-uploading is harmless: the server recognises each sale by its clientSaleId.
  */
 export interface QueuedSaleItem {
-  productId: string;
+  /** Null for a calculator amount line ("Articles divers"): unitPrice is the amount, nothing is stock-counted. */
+  productId: string | null;
   productName: string;
   thumbnailUrl: string | null;
   quantity: number;
@@ -150,12 +151,11 @@ export const useOfflineSalesStore = create<OfflineSalesState>()((set, get) => ({
             sales: batch.map((s) => ({
               clientSaleId: s.clientSaleId,
               cashierId: s.cashierId,
-              items: s.items.map((it) => ({
-                productId: it.productId,
-                quantity: it.quantity,
-                selectedColor: it.selectedColor,
-                selectedSize: it.selectedSize,
-              })),
+              items: s.items.map((it) =>
+                it.productId
+                  ? { productId: it.productId, quantity: it.quantity, selectedColor: it.selectedColor, selectedSize: it.selectedSize }
+                  : { amount: it.unitPrice, quantity: it.quantity, label: it.productName }
+              ),
               paymentMethod: s.paymentMethod,
               soldAt: s.soldAt,
             })),
@@ -249,6 +249,7 @@ export function withPendingStockTaken(products: Product[], queued: QueuedSale[])
   const taken = new Map<string, number>();
   for (const sale of queued) {
     for (const it of sale.items) {
+      if (!it.productId) continue; // calculator amount lines take no stock
       const key = `${it.productId}::${it.selectedColor}::${it.selectedSize}`;
       taken.set(key, (taken.get(key) ?? 0) + it.quantity);
     }

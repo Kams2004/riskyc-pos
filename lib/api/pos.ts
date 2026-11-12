@@ -58,9 +58,14 @@ export function resolveReconciliation(token: string, itemId: string) {
   return apiFetch<PosReconciliationLine>(`/api/pos/reconciliation/${itemId}/resolve`, { method: "POST", token });
 }
 
+export type SaleLineInput =
+  | { productId: string; quantity: number; selectedColor: string; selectedSize: string }
+  | { amount: number; quantity: number; label?: string };
+
 export interface CreateSaleInput {
   clientSaleId: string;
-  items: { productId: string; quantity: number; selectedColor: string; selectedSize: string }[];
+  /** A product line, or a calculator amount line ("Articles divers": no product, no stock — see app/calculator). */
+  items: SaleLineInput[];
   paymentMethod: PosPaymentMethod;
   soldAt: string;
 }

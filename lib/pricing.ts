@@ -77,13 +77,19 @@ export function reconstructSaleDiscount(
 ): number {
   const byId = new Map(products.map((p) => [p.id, p]));
   const groups = new Map<string, { quantity: number; lineTotal: number }[]>();
+  // Calculator amount lines ("Articles divers") have no product and never a bulk price: counted as they are.
+  let amountLinesTotal = 0;
   for (const item of items) {
-    if (!item.productId || !byId.has(item.productId)) return 0;
+    if (!item.productId) {
+      amountLinesTotal += item.unitPrice * item.quantity;
+      continue;
+    }
+    if (!byId.has(item.productId)) return 0;
     const list = groups.get(item.productId) ?? [];
     list.push({ quantity: item.quantity, lineTotal: item.unitPrice * item.quantity });
     groups.set(item.productId, list);
   }
-  let regularTotal = 0;
+  let regularTotal = amountLinesTotal;
   for (const [productId, lines] of groups) {
     const product = byId.get(productId)!;
     const repriced = allocateGroupedLineTotals(product.price, product.bulkPrices, lines.map((l) => l.quantity));

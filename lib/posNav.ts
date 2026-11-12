@@ -1,5 +1,5 @@
 import type { TKey } from "./i18n";
-import { ShoppingCart, Receipt, ClipboardList, Package, AlertTriangle, Settings as SettingsIcon } from "lucide-react";
+import { ShoppingCart, Calculator, Receipt, ClipboardList, Package, AlertTriangle, Settings as SettingsIcon } from "lucide-react";
 
 /**
  * The POS sidebar. Every screen has its own permission, ticked per role in the admin panel's Users & Roles, so a
@@ -7,6 +7,8 @@ import { ShoppingCart, Receipt, ClipboardList, Package, AlertTriangle, Settings 
  */
 export const POS_NAV_ITEMS = [
   { href: "/pos", labelKey: "nav.sale" as TKey, icon: ShoppingCart, permission: "POS_SELL" },
+  // Same permission as the Sale screen: it's another way to ring up a sale, for when the shop is too busy to pick articles.
+  { href: "/calculator", labelKey: "nav.calculator" as TKey, icon: Calculator, permission: "POS_SELL" },
   { href: "/sales", labelKey: "nav.salesHistory" as TKey, icon: Receipt, permission: "POS_VIEW_SALES" },
   { href: "/orders", labelKey: "nav.orders" as TKey, icon: ClipboardList, permission: "VIEW_ORDERS" },
   { href: "/products", labelKey: "nav.products" as TKey, icon: Package, permission: "VIEW_PRODUCTS" },
