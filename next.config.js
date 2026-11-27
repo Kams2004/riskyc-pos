@@ -14,6 +14,8 @@ const nextConfig = {
   distDir: desktop ? ".next-desktop" : ".next",
   experimental: {
     optimizePackageImports: ["lucide-react"],
+    // Keep Next.js security advisories surfaced at build time (set during the 16.4.3 → 16.4.6 security upgrade).
+    agentUpgrade: "security",
   },
   // This repo sits nested under the storefront's own directory (which has
   // its own lockfile) rather than in a real workspace — pin the root
