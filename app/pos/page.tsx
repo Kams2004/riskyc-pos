@@ -23,8 +23,8 @@ import { getCatalog, createSale, getSettings, listSales, listOnlineSales } from 
 import { allocateGroupedLineTotals } from "@/lib/pricing";
 import { availableQuantity, isProductSoldOut, stockLevel } from "@/lib/stock";
 import { CartLine, PosCatalog, PosPaymentMethod, PosSale, PosSettings, Product } from "@/lib/types";
-import PrintArea from "@/components/PrintArea";
-import { ReceiptData } from "@/components/Receipt";
+import ReceiptPrinter from "@/components/ReceiptPrinter";
+import { useReceiptPrinter } from "@/lib/printer/useReceiptPrinter";
 import PosShell from "@/components/PosShell";
 import { CheckoutBar, SuccessToast } from "@/components/SaleCheckout";
 import Pagination from "@/components/Pagination";
@@ -365,7 +365,8 @@ export default function PosScreen() {
   // Each upload of offline sales reloads the catalog and today's totals from the server.
   const syncedVersion = useOfflineSalesStore((s) => s.syncedVersion);
   const waitingSales = useMemo(() => pendingSales(queuedSales, serverClientIds), [queuedSales, serverClientIds]);
-  const [printData, setPrintData] = useState<ReceiptData | null>(null);
+  // Every ticket goes through here: thermal printer with confirmation, or the print window (this till's choice).
+  const receiptPrinter = useReceiptPrinter(settings);
 
   useEffect(() => {
     if (!hasHydrated || !session) return;
@@ -586,7 +587,7 @@ export default function PosScreen() {
   const todayTotal = (todayStats?.total ?? 0) + waitingToday.reduce((sum, s) => sum + s.total, 0);
 
   const printSale = (sale: PosSale, saleDiscount = 0) => {
-    setPrintData({
+    receiptPrinter.print({
       // The ref comes from the till's own sale id, so a ticket printed offline and the synced sale in Sales History match.
       saleRef: saleRefOf(sale),
       cashierName: sale.cashierName,
@@ -602,7 +603,6 @@ export default function PosScreen() {
       soldAt: sale.soldAt,
       discount: saleDiscount,
     });
-    setTimeout(() => window.print(), 50);
   };
 
   if (!session) return null;
@@ -784,7 +784,7 @@ export default function PosScreen() {
         />
       )}
 
-      <PrintArea settings={settings} data={printData} />
+      <ReceiptPrinter printer={receiptPrinter} />
     </>
   );
 }

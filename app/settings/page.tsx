@@ -10,9 +10,11 @@ import { getSettings, updateSettings, uploadLogo, removeLogo } from "@/lib/api/p
 import { PosSettings, ReceiptPaperWidth } from "@/lib/types";
 import PosShell from "@/components/PosShell";
 import ToggleSwitch from "@/components/ToggleSwitch";
-import Receipt, { ReceiptData } from "@/components/Receipt";
-import PrintArea from "@/components/PrintArea";
+import Receipt from "@/components/Receipt";
+import ReceiptPrinter from "@/components/ReceiptPrinter";
+import { useReceiptPrinter } from "@/lib/printer/useReceiptPrinter";
 import TillsCard from "@/components/TillsCard";
+import PrinterSetup from "@/components/PrinterSetup";
 import AppUpdateCard from "@/components/AppUpdateCard";
 import { TKey, useT } from "@/lib/i18n";
 
@@ -72,7 +74,8 @@ export default function SettingsPage() {
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState("");
-  const [printData, setPrintData] = useState<ReceiptData | null>(null);
+  // Every ticket goes through here: thermal printer with confirmation, or the print window (this till's choice).
+  const receiptPrinter = useReceiptPrinter(settings);
   const [removingLogo, setRemovingLogo] = useState(false);
 
   useEffect(() => {
@@ -129,7 +132,7 @@ export default function SettingsPage() {
   };
 
   const printTestTicket = () => {
-    setPrintData({
+    receiptPrinter.print({
       saleRef: "TEST0001",
       cashierName: session?.firstName ?? "Test",
       items: [{ productName: t("settings.testItem"), selectedColor: "", selectedSize: "", quantity: 1, unitPrice: 1000 }],
@@ -137,7 +140,6 @@ export default function SettingsPage() {
       paymentMethod: "CASH",
       soldAt: new Date().toISOString(),
     });
-    setTimeout(() => window.print(), 50);
   };
 
   const enabledCount = settings ? PAYMENT_METHODS.filter((m) => settings[m.key]).length : 0;
@@ -199,9 +201,7 @@ export default function SettingsPage() {
 
                     <SectionCard title={t("settings.printer")}>
                       <div className="space-y-4">
-                        <div className="bg-blue-50 border border-blue-100 rounded-xl p-3.5 text-xs text-blue-700 leading-relaxed">
-                          {t("settings.printerHint")}
-                        </div>
+                        <PrinterSetup settings={settings} />
 
                         <div>
                           <label className="block text-xs font-semibold text-gray-900 mb-1.5">{t("settings.paperWidth")}</label>
@@ -381,7 +381,7 @@ export default function SettingsPage() {
         </div>
       </PosShell>
 
-      <PrintArea settings={settings} data={printData} />
+      <ReceiptPrinter printer={receiptPrinter} />
     </>
   );
 }

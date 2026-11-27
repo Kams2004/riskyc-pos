@@ -24,8 +24,8 @@ import { listSales, listOnlineSales, voidSale, getSettings, getCatalog } from "@
 import { reconstructSaleDiscount } from "@/lib/pricing";
 import { QueuedSale, saleRefOf, useOfflineSalesStore } from "@/lib/offlineSales";
 import { OnlineOrder, PosSale, PosSettings, PosPaymentMethod, Product } from "@/lib/types";
-import PrintArea from "@/components/PrintArea";
-import { ReceiptData } from "@/components/Receipt";
+import ReceiptPrinter from "@/components/ReceiptPrinter";
+import { useReceiptPrinter } from "@/lib/printer/useReceiptPrinter";
 import PosShell from "@/components/PosShell";
 import Pagination from "@/components/Pagination";
 import { TKey, t as tStatic, useT } from "@/lib/i18n";
@@ -138,7 +138,8 @@ export default function SalesHistoryPage() {
   const [sales, setSales] = useState<PosSale[]>([]);
   const [onlineSales, setOnlineSales] = useState<OnlineOrder[]>([]);
   const [settings, setSettings] = useState<PosSettings | null>(null);
-  const [printData, setPrintData] = useState<ReceiptData | null>(null);
+  // Every ticket goes through here: thermal printer with confirmation, or the print window (this till's choice).
+  const receiptPrinter = useReceiptPrinter(settings);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [voidingId, setVoidingId] = useState<string | null>(null);
@@ -267,7 +268,7 @@ export default function SalesHistoryPage() {
   };
 
   const printSale = (sale: SaleRow) => {
-    setPrintData({
+    receiptPrinter.print({
       saleRef: sale.ref,
       cashierName: sale.person,
       items: sale.items.map((i) => ({
@@ -283,7 +284,6 @@ export default function SalesHistoryPage() {
       // Same "Bulk discount" line the original ticket had, when it can be worked out reliably.
       discount: sale.queued ? sale.queued.discount : reconstructSaleDiscount(sale.items, sale.total, catalogProducts),
     });
-    setTimeout(() => window.print(), 50);
   };
 
   const exportCsv = () => {
@@ -586,7 +586,7 @@ export default function SalesHistoryPage() {
         </div>
       </PosShell>
 
-      <PrintArea settings={settings} data={printData} />
+      <ReceiptPrinter printer={receiptPrinter} />
     </>
   );
 }

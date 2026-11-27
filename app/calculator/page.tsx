@@ -12,8 +12,8 @@ import { desktop, isDesktop } from "@/lib/desktop";
 import { useTillStore } from "@/lib/tillStore";
 import { QueuedSale, queuedSaleAsPosSale, saleRefOf, useOfflineSalesStore } from "@/lib/offlineSales";
 import { PosPaymentMethod, PosSale, PosSettings } from "@/lib/types";
-import { ReceiptData } from "@/components/Receipt";
-import PrintArea from "@/components/PrintArea";
+import ReceiptPrinter from "@/components/ReceiptPrinter";
+import { useReceiptPrinter } from "@/lib/printer/useReceiptPrinter";
 import PosShell from "@/components/PosShell";
 import { CheckoutBar, SuccessToast } from "@/components/SaleCheckout";
 import { useT } from "@/lib/i18n";
@@ -45,7 +45,8 @@ export default function CalculatorScreen() {
   const [qtyText, setQtyText] = useState<string | null>(null);
   const [successSale, setSuccessSale] = useState<PosSale | null>(null);
   const [successOffline, setSuccessOffline] = useState(false);
-  const [printData, setPrintData] = useState<ReceiptData | null>(null);
+  // Every ticket goes through here: thermal printer with confirmation, or the print window (this till's choice).
+  const receiptPrinter = useReceiptPrinter(settings);
 
   // Shop ticket settings (enabled payment methods, receipt header): the till's saved copy first, then the server's.
   useEffect(() => {
@@ -128,7 +129,7 @@ export default function CalculatorScreen() {
   }, [press]);
 
   const printSale = (sale: PosSale) => {
-    setPrintData({
+    receiptPrinter.print({
       saleRef: saleRefOf(sale),
       cashierName: sale.cashierName,
       items: sale.items.map((i) => ({
@@ -143,7 +144,6 @@ export default function CalculatorScreen() {
       soldAt: sale.soldAt,
       discount: 0,
     });
-    setTimeout(() => window.print(), 50);
   };
 
   /** Same rules as the Sale screen: online it's recorded on the server; unreachable on the desktop app, kept on the till. */
@@ -354,7 +354,7 @@ export default function CalculatorScreen() {
           onDismiss={() => setSuccessSale(null)}
         />
       )}
-      <PrintArea settings={settings} data={printData} />
+      <ReceiptPrinter printer={receiptPrinter} />
     </>
   );
 }
