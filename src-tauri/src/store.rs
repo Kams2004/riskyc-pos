@@ -11,6 +11,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+/// Key of the queue of sales rung up offline (see lib/desktop.ts → salesQueueGet); kept by `reset`.
+const SALES_QUEUE_KEY: &str = "queue:sales";
 const KEYRING_SERVICE: &str = "com.riskycfashion.pos";
 const KEYRING_USER: &str = "local-db-key";
 const DB_FILE: &str = "riskyc-pos.db";
@@ -147,9 +149,12 @@ impl Store {
     }
 
     /// Wipes everything tied to the till's enrolment (used when the till is revoked or re-enrolled).
+    /// Forgets the till's link, cached catalog and offline logins (after a revoke, or to set the till up again) —
+    /// but never the sales still waiting to be uploaded: they are real money, and go up once the till is linked again.
     pub fn reset(&self) -> Result<(), String> {
         let conn = self.conn.lock().map_err(|_| "store poisoned")?;
-        conn.execute_batch("DELETE FROM kv; DELETE FROM cashiers;").map_err(|e| e.to_string())
+        conn.execute_batch(&format!("DELETE FROM kv WHERE key <> '{SALES_QUEUE_KEY}'; DELETE FROM cashiers;"))
+            .map_err(|e| e.to_string())
     }
 
     /// After a successful online login: keep an Argon2 hash of the password (never the password itself) so the
@@ -249,6 +254,22 @@ mod tests {
         assert_eq!(store.offline_login("awa@shop.cm", "s3cret", 7).unwrap(), None, "expired offline login accepted");
         store.reset().unwrap();
         assert_eq!(store.offline_login("awa@shop.cm", "s3cret", 7).unwrap(), None);
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn reset_keeps_sales_waiting_to_upload() {
+        let dir = temp_dir("reset");
+        let store = Store::open(&dir, KeySource::File).unwrap();
+        store.kv_set("device", "{\"id\":\"till-1\"}").unwrap();
+        store.kv_set("cache:catalog", "{}").unwrap();
+        store.kv_set("queue:sales", "[{\"clientSaleId\":\"s1\"}]").unwrap();
+        store.remember_cashier("awa@shop.cm", "s3cret", "{}").unwrap();
+        store.reset().unwrap();
+        assert_eq!(store.kv_get("device").unwrap(), None, "link survived a reset");
+        assert_eq!(store.kv_get("cache:catalog").unwrap(), None);
+        assert_eq!(store.offline_login("awa@shop.cm", "s3cret", 7).unwrap(), None);
+        assert_eq!(store.kv_get("queue:sales").unwrap().as_deref(), Some("[{\"clientSaleId\":\"s1\"}]"), "unsent sales lost on reset");
         fs::remove_dir_all(&dir).unwrap();
     }
 }

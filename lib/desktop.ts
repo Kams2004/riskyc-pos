@@ -34,7 +34,7 @@ function setJson(key: string, value: unknown) {
 export const desktop = {
   getDevice: () => getJson<TillDevice>("device"),
   saveDevice: (device: TillDevice) => setJson("device", device),
-  /** Forgets the enrolment, cached data and offline logins — after a revoke, or to set the till up again. */
+  /** Forgets the enrolment, cached data and offline logins — after a revoke, or to set the till up again. Unsent sales are kept. */
   resetTill: () => call<void>("reset_till"),
   cacheGet: <T,>(key: string) => getJson<T>(`cache:${key}`),
   cacheSet: (key: string, value: unknown) => setJson(`cache:${key}`, value),
