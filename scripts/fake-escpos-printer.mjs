@@ -110,7 +110,7 @@ const server = net.createServer((socket) => {
         if (left < 3) break;
         if (op === 0x72) { // GS r n: confirmation, after everything before it is processed
           const answer = confirmByte();
-          flush(runOut ? "paper ran out during the ticket" : "confirmed");
+          flush(runOut ? "paper ran out during the ticket" : silent || noConfirm ? "not confirmed to the till" : "confirmed");
           if (!silent && !noConfirm) setTimeout(() => !socket.destroyed && socket.write(Buffer.from([answer])), slowMs);
         }
         i += 3; // GS ! n, GS r n
