@@ -658,7 +658,7 @@ export default function PosScreen() {
       <PosShell title={t("sale.title")} headerExtra={headerExtra}>
         <div className="flex-1 flex flex-col lg:flex-row min-h-0">
           {/* Catalog */}
-          <div className="relative flex-1 flex flex-col min-h-0 p-4 sm:p-6">
+          <div className="relative flex-1 flex flex-col min-h-0 min-w-0 p-4 sm:p-6">
             {categories.length > 1 && (
               <div className="flex-shrink-0 flex gap-2 overflow-x-auto pb-3 -mx-1 px-1">
                 <button
