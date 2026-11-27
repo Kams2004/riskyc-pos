@@ -9,7 +9,8 @@
     "lint": "next lint",
     "desktop:dev": "tauri dev",
     "desktop:build": "tauri build",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "test:printer": "rm -rf .test-build && tsc lib/printer/escpos.ts lib/printer/printJob.ts lib/printer/printer.test.ts --module commonjs --target es2022 --moduleResolution node --esModuleInterop --types node --skipLibCheck --outDir .test-build/printer && node --test .test-build/printer/"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.12.4",

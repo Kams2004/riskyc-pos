@@ -28,3 +28,4 @@ yarn-error.log*
 /.next-desktop/
 /out/
 /src-tauri/target/
+.test-build/
