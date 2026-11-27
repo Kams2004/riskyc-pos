@@ -79,11 +79,14 @@ interface FakeBehaviour {
   canRead?: boolean;
   failOpen?: boolean;
   failWrite?: boolean;
+  /** The link drops once the ticket was sent, before any confirmation is read. */
+  failReadAfterTicket?: boolean;
 }
 
 function fakePrinter(b: FakeBehaviour) {
   const received: number[] = [];
   let inbox: number[] = [];
+  let ticketSent = false;
   const conn: PrinterConnection = {
     canRead: b.canRead !== false,
     async write(bytes) {
@@ -94,10 +97,14 @@ function fakePrinter(b: FakeBehaviour) {
           const n = bytes[i + 2];
           inbox.push(n === 1 ? b.printerByte ?? 0x12 : n === 2 ? b.offlineCauseByte ?? 0x12 : b.paperByte ?? 0x12);
         }
-        if (bytes[i] === 0x1d && bytes[i + 1] === 0x72 && b.confirm !== false) inbox.push(b.confirmByte ?? 0x00);
+        if (bytes[i] === 0x1d && bytes[i + 1] === 0x72) {
+          ticketSent = true;
+          if (b.confirm !== false) inbox.push(b.confirmByte ?? 0x00);
+        }
       }
     },
     async read() {
+      if (b.failReadAfterTicket && ticketSent) throw new Error("socket closed");
       const out = Uint8Array.from(inbox);
       inbox = [];
       return out;
@@ -164,6 +171,11 @@ test("unreachable and broken connection", async () => {
   assert.deepEqual(off.result === "failed" && off.failure, "unreachable");
   const cut = await printWithConfirmation(fakePrinter({ failWrite: true, realtime: false }).open, ticket, fast);
   assert.deepEqual(cut.result === "failed" && cut.failure, "interrupted");
+});
+
+test("connection lost while waiting for the confirmation: failed, never printed", async () => {
+  const out = await printWithConfirmation(fakePrinter({ failReadAfterTicket: true }).open, ticket, fast);
+  assert.deepEqual(out.result === "failed" && out.failure, "interrupted");
 });
 
 test("check printer", async () => {

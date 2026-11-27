@@ -112,7 +112,13 @@ export async function printWithConfirmation(
     const wait = opts.known?.confirm === false ? 1500 : opts.confirmTimeoutMs ?? CONFIRM_TIMEOUT_MS;
     const deadline = Date.now() + wait;
     while (Date.now() < deadline) {
-      const got = await conn.read(Math.max(1, deadline - Date.now()));
+      let got: Uint8Array;
+      try {
+        got = await conn.read(Math.max(1, deadline - Date.now()));
+      } catch (e) {
+        // The link dropped before the printer confirmed: the ticket may not have come out.
+        return { result: "failed", failure: "interrupted", detail: message(e), capabilities: caps };
+      }
       if (got.length === 0) break;
       const answer = [...got].map(parseConfirmByte).find((a) => a.valid);
       if (answer) {
