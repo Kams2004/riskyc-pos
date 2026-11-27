@@ -1,3 +1,4 @@
+mod printer;
 mod store;
 
 use store::{KeySource, Store};
@@ -53,9 +54,29 @@ pub fn run() {
             let dir = app.path().app_data_dir()?;
             let store = Store::open(&dir, KeySource::OsKeyring)?;
             app.manage(store);
+            app.manage(printer::PrinterSessions::default());
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![kv_get, kv_set, kv_delete, reset_till, remember_cashier, offline_login])
+        .invoke_handler(tauri::generate_handler![
+            kv_get,
+            kv_set,
+            kv_delete,
+            reset_till,
+            remember_cashier,
+            offline_login,
+            printer::printer_scan_network,
+            printer::printer_list_serial,
+            printer::printer_list_usb_devices,
+            printer::printer_list_system,
+            printer::printer_system_status,
+            printer::printer_open,
+            printer::printer_write,
+            printer::printer_read,
+            printer::printer_close,
+            printer::printer_print_system,
+            printer::printer_system_job_status,
+            printer::printer_system_cancel,
+        ])
         .run(tauri::generate_context!())
         .expect("error while running the Riskyc POS app");
 }

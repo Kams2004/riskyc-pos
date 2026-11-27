@@ -23,6 +23,17 @@ rusqlite = { version = "0.41.1", features = ["bundled-sqlcipher-vendored-openssl
 argon2 = { version = "0.5", features = ["std"] }
 hex = "0.4.3"
 keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service", "crypto-rust"] }
+# Receipt printers: serial/Bluetooth ports (no libudev: ports are read from /sys on Linux), local network interfaces
+# for the printer search, and tokio for the concurrent port-9100 probe.
+serialport = { version = "4.10", default-features = false }
+if-addrs = "0.15"
+tokio = { version = "1", features = ["net", "time", "rt", "sync", "macros"] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Graphics_Printing", "Win32_Graphics_Gdi", "Win32_Security", "Win32_Devices_DeviceAndDriverInstallation", "Win32_System_Registry"] }
 
 [profile.release]
 codegen-units = 1
